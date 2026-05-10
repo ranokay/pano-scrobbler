@@ -97,30 +97,8 @@ jobs:
           name: pano-scrobbler-${{ matrix.resources-dir }}
           path: dist/pano-scrobbler-${{ matrix.resources-dir }}*
 
-  build-macos-dmg:
-    name: Build macOS DMG
-    runs-on: macos-26
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v6
-
-      - name: Show toolchain
-        working-directory: apple
-        run: |
-          swift --version
-          xcodebuild -version
-
-      - name: Build DMG
-        run: bash apple/scripts/build_dmg.sh
-
-      - name: Upload macOS DMG
-        uses: actions/upload-artifact@v6
-        with:
-          name: pano-scrobbler-macos-arm64
-          path: dist/pano-scrobbler-macos-arm64.dmg
-  
   upload-release:
-    needs: [ build, build-macos-dmg ]
+    needs: [ build ]
     runs-on: windows-2025-vs2026
     if: ${{ inputs.upload-release == true }}
     steps:

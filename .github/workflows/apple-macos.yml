@@ -1,28 +1,81 @@
 name: Pano Scrobbler macOS
 
 on:
+  workflow_dispatch:
+    inputs:
+      upload-release:
+        type: boolean
+        description: "Upload macOS DMG to GitHub Releases?"
+        required: false
+        default: false
   push:
     paths:
       - "apple/**"
+      - "version.txt"
+      - "changelog.md"
       - ".github/workflows/apple-macos.yml"
   pull_request:
     paths:
       - "apple/**"
+      - "version.txt"
+      - "changelog.md"
       - ".github/workflows/apple-macos.yml"
 
+permissions:
+  contents: write
+
 jobs:
-  swiftpm:
+  macos:
+    name: Test, build, and release macOS
     runs-on: macos-26
     steps:
-      - uses: actions/checkout@v6
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
       - name: Show toolchain
         working-directory: apple
         run: |
           swift --version
           xcodebuild -version
+
       - name: Build
         working-directory: apple
         run: swift build
+
       - name: Test
         working-directory: apple
         run: swift test
+
+      - name: Build DMG
+        run: bash apple/scripts/build_dmg.sh
+
+      - name: Upload macOS DMG artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: pano-scrobbler-macos-arm64
+          path: dist/pano-scrobbler-macos-arm64.dmg
+
+      - name: Read release metadata
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload-release == true }}
+        id: release_metadata
+        shell: bash
+        run: |
+          verCode="$(tr -cd '0-9' < version.txt)"
+          verName="$((10#$verCode / 100)).$((10#$verCode % 100))"
+          echo "verCode=$verCode" >> "$GITHUB_OUTPUT"
+          echo "verName=$verName" >> "$GITHUB_OUTPUT"
+          {
+            echo "changelog<<EOF"
+            cat changelog.md
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create macOS GitHub Release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload-release == true }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: macos-${{ steps.release_metadata.outputs.verCode }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.release_metadata.outputs.verName }} macOS
+          body: ${{ steps.release_metadata.outputs.changelog }}
+          files: dist/pano-scrobbler-macos-*.dmg
