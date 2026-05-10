@@ -71,14 +71,13 @@ jobs:
         shell: bash
         run: |
           verCode="$(tr -cd '0-9' < version.txt)"
+          if [ -z "$verCode" ]; then
+            echo "version.txt does not contain a numeric version code" >&2
+            exit 1
+          fi
           verName="$((10#$verCode / 100)).$((10#$verCode % 100))"
           echo "verCode=$verCode" >> "$GITHUB_OUTPUT"
           echo "verName=$verName" >> "$GITHUB_OUTPUT"
-          {
-            echo "changelog<<EOF"
-            cat changelog.md
-            echo "EOF"
-          } >> "$GITHUB_OUTPUT"
 
       - name: Create macOS GitHub Release
         uses: softprops/action-gh-release@v2
@@ -86,7 +85,7 @@ jobs:
           tag_name: macos-${{ steps.release_metadata.outputs.verCode }}
           target_commitish: ${{ github.sha }}
           name: ${{ steps.release_metadata.outputs.verName }} macOS
-          body: ${{ steps.release_metadata.outputs.changelog }}
+          body_path: changelog.md
           files: dist/pano-scrobbler-macos-*.dmg
           make_latest: false
           overwrite_files: true
