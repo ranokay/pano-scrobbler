@@ -29,6 +29,25 @@ yay -S pano-scrobbler-bin
 
 The desktop versions do not use any closed source libraries.
 
+**macOS (Apple Silicon, macOS 26+):**
+
+Download `pano-scrobbler-macos-arm64.dmg` from the macOS release on
+[GitHub Releases](https://github.com/kawaiiDango/pano-scrobbler/releases), open the DMG, and drag
+`Pano Scrobbler.app` to Applications. macOS release tags are named like `macos-438`.
+
+The macOS DMG is not notarized yet. On first launch, right-click `Pano Scrobbler.app`, choose
+Open, and confirm the security prompt.
+
+To build the macOS DMG from source, install Xcode 26 or Swift 6.2+, then run:
+
+```bash
+git clone https://github.com/kawaiiDango/pano-scrobbler.git
+cd pano-scrobbler
+swift test --package-path apple
+bash apple/scripts/build_dmg.sh
+open dist/pano-scrobbler-macos-arm64.dmg
+```
+
 **Android (phones, tablets, TVs and Chromebooks):**
 
 [![github](img/github.svg)](https://github.com/kawaiiDango/pano-scrobbler/releases)

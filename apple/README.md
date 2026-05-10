@@ -15,3 +15,16 @@ The direct-notarized macOS build can use broader integrations than a Mac App
 Store build. A general public API for reading every other app's Now Playing
 metadata does not exist on macOS, so unsupported global media capture remains
 isolated behind `GlobalNowPlayingProvider`.
+
+## Build
+
+Use Xcode 26 or Swift 6.2+ on macOS 26 or later.
+
+```bash
+swift test --package-path apple
+bash apple/scripts/build_dmg.sh
+```
+
+The packaging script creates `dist/pano-scrobbler-macos-arm64.dmg` on Apple
+Silicon hosts. The DMG is not notarized yet, so first launch requires using
+right-click > Open in Finder.

@@ -2,12 +2,6 @@ name: Pano Scrobbler macOS
 
 on:
   workflow_dispatch:
-    inputs:
-      upload-release:
-        type: boolean
-        description: "Upload macOS DMG to GitHub Releases?"
-        required: false
-        default: false
   push:
     paths:
       - "apple/**"
@@ -22,11 +16,11 @@ on:
       - ".github/workflows/apple-macos.yml"
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   macos:
-    name: Test, build, and release macOS
+    name: Test and build macOS
     runs-on: macos-26
     steps:
       - name: Checkout repository
@@ -55,8 +49,24 @@ jobs:
           name: pano-scrobbler-macos-arm64
           path: dist/pano-scrobbler-macos-arm64.dmg
 
+  publish-release:
+    name: Publish macOS release
+    needs: [macos]
+    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Download macOS DMG artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: pano-scrobbler-macos-arm64
+          path: dist
+
       - name: Read release metadata
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload-release == true }}
         id: release_metadata
         shell: bash
         run: |
@@ -71,7 +81,6 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Create macOS GitHub Release
-        if: ${{ github.event_name == 'workflow_dispatch' && inputs.upload-release == true }}
         uses: softprops/action-gh-release@v2
         with:
           tag_name: macos-${{ steps.release_metadata.outputs.verCode }}
@@ -79,3 +88,6 @@ jobs:
           name: ${{ steps.release_metadata.outputs.verName }} macOS
           body: ${{ steps.release_metadata.outputs.changelog }}
           files: dist/pano-scrobbler-macos-*.dmg
+          make_latest: false
+          overwrite_files: true
+          fail_on_unmatched_files: true
