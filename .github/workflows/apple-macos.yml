@@ -12,9 +12,14 @@ on:
 
 jobs:
   swiftpm:
-    runs-on: macos-latest
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+      - name: Show toolchain
+        working-directory: apple
+        run: |
+          swift --version
+          xcodebuild -version
       - name: Build
         working-directory: apple
         run: swift build
