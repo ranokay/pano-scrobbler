@@ -1,0 +1,26 @@
+[tasks.build]
+description = "Build and stage the Pano Scrobbler macOS app bundle"
+run = "scripts/build_app.sh"
+
+[tasks.dmg]
+description = "Build, sign, and package the Pano Scrobbler macOS DMG"
+run = "scripts/build_dmg.sh"
+
+[tasks.launch]
+description = "Build and launch the Pano Scrobbler macOS app"
+depends = ["build"]
+run = "open -n '../dist/Pano Scrobbler.app'"
+
+[tasks.test]
+description = "Run the Pano Scrobbler unit tests"
+run = "swift test"
+
+[tasks.verify-release]
+description = "Run the local production-readiness gates that do not require notarization credentials"
+run = """
+swift test
+scripts/build_dmg.sh
+codesign --verify --deep --strict --verbose=4 '../dist/Pano Scrobbler.app'
+lipo -info '../dist/Pano Scrobbler.app/Contents/MacOS/PanoScrobbler'
+hdiutil verify '../dist/pano-scrobbler-macos-universal.dmg'
+"""

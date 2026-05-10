@@ -1,0 +1,124 @@
+name: Pano Scrobbler macOS
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "apple/**"
+      - "version.txt"
+      - "changelog.md"
+      - ".github/workflows/apple-macos.yml"
+  pull_request:
+    paths:
+      - "apple/**"
+      - "version.txt"
+      - "changelog.md"
+      - ".github/workflows/apple-macos.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  macos:
+    name: Test and build macOS
+    runs-on: macos-26
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Show toolchain
+        working-directory: apple
+        run: |
+          swift --version
+          xcodebuild -version
+
+      - name: Import Developer ID certificate
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ github.run_id }}
+        run: |
+          if [ -z "$MACOS_CERTIFICATE_P12_BASE64" ]; then
+            echo "No Developer ID certificate configured; local validation will use ad-hoc signing."
+            exit 0
+          fi
+
+          certificate_path="$RUNNER_TEMP/developer-id.p12"
+          keychain_path="$RUNNER_TEMP/app-signing.keychain-db"
+
+          echo "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$certificate_path"
+          security create-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security import "$certificate_path" -P "$MACOS_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k "$keychain_path"
+          security list-keychain -d user -s "$keychain_path"
+          security set-key-partition-list -S apple-tool:,apple: -s -k "$KEYCHAIN_PASSWORD" "$keychain_path"
+          security find-identity -v -p codesigning "$keychain_path"
+
+      - name: Build
+        working-directory: apple
+        run: swift build
+
+      - name: Test
+        working-directory: apple
+        run: swift test
+
+      - name: Build DMG
+        env:
+          MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
+          MACOS_DMG_CODESIGN_IDENTITY: ${{ secrets.MACOS_DMG_CODESIGN_IDENTITY || secrets.MACOS_CODESIGN_IDENTITY }}
+          NOTARYTOOL_PROFILE: ${{ secrets.NOTARYTOOL_PROFILE }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          PANO_DISCORD_CLIENT_ID: ${{ secrets.PANO_DISCORD_CLIENT_ID }}
+          REQUIRE_NOTARIZATION: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && '1' || '0' }}
+        run: bash apple/scripts/build_dmg.sh
+
+      - name: Upload macOS DMG artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: pano-scrobbler-macos-universal
+          path: dist/pano-scrobbler-macos-universal.dmg
+
+  publish-release:
+    name: Publish macOS release
+    needs: [macos]
+    if: ${{ (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v6
+
+      - name: Download macOS DMG artifact
+        uses: actions/download-artifact@v8
+        with:
+          name: pano-scrobbler-macos-universal
+          path: dist
+
+      - name: Read release metadata
+        id: release_metadata
+        shell: bash
+        run: |
+          verCode="$(tr -cd '0-9' < version.txt)"
+          if [ -z "$verCode" ]; then
+            echo "version.txt does not contain a numeric version code" >&2
+            exit 1
+          fi
+          verName="$((10#$verCode / 100)).$((10#$verCode % 100))"
+          echo "verCode=$verCode" >> "$GITHUB_OUTPUT"
+          echo "verName=$verName" >> "$GITHUB_OUTPUT"
+
+      - name: Create macOS GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: macos-${{ steps.release_metadata.outputs.verCode }}
+          target_commitish: ${{ github.sha }}
+          name: ${{ steps.release_metadata.outputs.verName }} macOS
+          body_path: changelog.md
+          files: dist/pano-scrobbler-macos-*.dmg
+          make_latest: false
+          overwrite_files: true
+          fail_on_unmatched_files: true

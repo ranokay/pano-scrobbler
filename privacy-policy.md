@@ -25,9 +25,16 @@ tracking services of your choice such as Last.fm, Libre.fm, ListenBrainz and sel
 - The app sends non-personal information such as titles of music playing on the device and other
   music metadata, to the previously mentioned music tracking services of your choice, for its core
   functionality.
-- To fetch images of artists and albums, the name of the artist and album is sent to Spotify. This
-  is functionality disabled by default for fresh installations.
+- On macOS, the app can use Automation permission to read now-playing metadata from Music and
+  Spotify. This metadata is processed locally before being submitted only to the services you
+  configure.
+- To fetch images of artists and albums, the name of the artist and album may be sent to artwork
+  providers. On macOS this includes Apple's iTunes Search API and Deezer. Other app variants may
+  use Spotify where that integration is available. This functionality is disabled by default for
+  fresh installations where the platform supports that preference.
 - To fetch the missing metadata while scrobbling Deezer on Windows, the app uses the Deezer API.
+- If Discord Rich Presence is enabled on desktop, the currently playing track metadata is sent to
+  the local Discord desktop app through Discord IPC so Discord can display it as your status.
 - If you are using the Google Play version and automatic error reporting is enabled, an anonymous,
   resettable device identifier is sent to Firebase Crashlytics, along with stack traces of the
   error.
@@ -47,6 +54,9 @@ Link to privacy policies of third party service providers used by the app
 - [Libre.fm](https://libre.fm/privacy)
 - [ListenBrainz](https://metabrainz.org/privacy)
 - [Spotify](https://www.spotify.com/legal/privacy-policy)
+- [Deezer](https://www.deezer.com/legal/personal-datas)
+- [Apple](https://www.apple.com/legal/privacy/)
+- [Discord](https://discord.com/privacy)
 - [Firebase Crashlytics](https://firebase.google.com/support/privacy) (for the Google Play version
   only)
 
@@ -65,8 +75,9 @@ Cookies are files with a small amount of data that are commonly used as anonymou
 identifiers. These are sent to your browser from the websites that you visit and are stored on your
 device's internal memory.
 
-This app uses a webview for logging in to Last.fm. This 3rd party website may use cookies to keep
-track of logged-in sessions and to improve their services.
+Some app variants use a webview for logging in to Last.fm. The macOS app opens your default browser
+for Last.fm authorization instead. Last.fm may use cookies to keep track of logged-in sessions and
+to improve their services.
 
 ### Notification Read, Reply and Control (Android Permission)
 

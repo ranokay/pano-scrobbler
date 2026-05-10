@@ -1,0 +1,122 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXFileReference section */
+		111111111111111111111111 /* Package.swift */ = {isa = PBXFileReference; lastKnownFileType = text; path = Package.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		222222222222222222222222 = {
+			isa = PBXGroup;
+			children = (
+				111111111111111111111111 /* Package.swift */,
+			);
+			sourceTree = "<group>";
+		};
+		333333333333333333333333 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXLegacyTarget section */
+		888888888888888888888888 /* Pano Scrobbler */ = {
+			isa = PBXLegacyTarget;
+			buildArgumentsString = build;
+			buildConfigurationList = 999999999999999999999999 /* Build configuration list for PBXLegacyTarget "Pano Scrobbler" */;
+			buildPhases = (
+			);
+			buildToolPath = /usr/bin/swift;
+			buildWorkingDirectory = "";
+			dependencies = (
+			);
+			name = "Pano Scrobbler";
+			passBuildSettingsInEnvironment = 1;
+			productName = PanoScrobbler;
+		};
+/* End PBXLegacyTarget section */
+
+/* Begin PBXProject section */
+		444444444444444444444444 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2640;
+				LastUpgradeCheck = 2640;
+			};
+			buildConfigurationList = 555555555555555555555555 /* Build configuration list for PBXProject "Pano Scrobbler" */;
+			compatibilityVersion = "Xcode 15.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 222222222222222222222222;
+			productRefGroup = 333333333333333333333333 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				888888888888888888888888 /* Pano Scrobbler */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin XCBuildConfiguration section */
+		666666666666666666666666 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+			};
+			name = Debug;
+		};
+		777777777777777777777777 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+			};
+			name = Release;
+		};
+		AAAAAAAAAAAAAAAAAAAAAAAA /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+			};
+			name = Debug;
+		};
+		BBBBBBBBBBBBBBBBBBBBBBBB /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		555555555555555555555555 /* Build configuration list for PBXProject "Pano Scrobbler" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				666666666666666666666666 /* Debug */,
+				777777777777777777777777 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		999999999999999999999999 /* Build configuration list for PBXLegacyTarget "Pano Scrobbler" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				AAAAAAAAAAAAAAAAAAAAAAAA /* Debug */,
+				BBBBBBBBBBBBBBBBBBBBBBBB /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 444444444444444444444444 /* Project object */;
+}

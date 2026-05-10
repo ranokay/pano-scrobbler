@@ -96,7 +96,7 @@ jobs:
         with:
           name: pano-scrobbler-${{ matrix.resources-dir }}
           path: dist/pano-scrobbler-${{ matrix.resources-dir }}*
-  
+
   upload-release:
     needs: [ build ]
     runs-on: windows-2025-vs2026
