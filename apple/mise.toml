@@ -1,0 +1,12 @@
+[tasks.build]
+description = "Build the Pano Scrobbler macOS app"
+run = "xcodebuild build -workspace 'Pano Scrobbler.xcworkspace' -scheme 'Pano Scrobbler' -destination 'platform=macOS' -derivedDataPath /tmp/pano-scrobbler-mise-build CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO"
+
+[tasks.launch]
+description = "Build and launch the Pano Scrobbler macOS app"
+depends = ["build"]
+run = "../script/build_and_run.sh"
+
+[tasks.test]
+description = "Run the Pano Scrobbler unit tests"
+run = "swift test"
