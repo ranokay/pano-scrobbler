@@ -593,8 +593,13 @@ struct MusicEntryInfoView: View {
     }
 
     private var entryURL: URL? {
-        let urlString = trackInfo?.url ?? albumInfo?.url ?? artistInfo?.url ?? track?.url ?? album?.url ?? artist?.url
-        return urlString.flatMap { URL(string: $0) }
+        if let urlString = trackInfo?.url { return URL(string: urlString) }
+        if let urlString = albumInfo?.url { return URL(string: urlString) }
+        if let urlString = artistInfo?.url { return URL(string: urlString) }
+        if let urlString = track?.url { return URL(string: urlString) }
+        if let urlString = album?.url { return URL(string: urlString) }
+        if let urlString = artist?.url { return URL(string: urlString) }
+        return nil
     }
 
     private var userPlaycount: Int? {
