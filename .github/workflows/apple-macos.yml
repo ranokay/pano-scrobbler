@@ -1,0 +1,23 @@
+name: Pano Scrobbler macOS
+
+on:
+  push:
+    paths:
+      - "apple/**"
+      - ".github/workflows/apple-macos.yml"
+  pull_request:
+    paths:
+      - "apple/**"
+      - ".github/workflows/apple-macos.yml"
+
+jobs:
+  swiftpm:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        working-directory: apple
+        run: swift build
+      - name: Test
+        working-directory: apple
+        run: swift test
