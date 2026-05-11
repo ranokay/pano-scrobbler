@@ -122,6 +122,7 @@ final class AppModel: ObservableObject {
         engineTask?.cancel()
         statusTask?.cancel()
         retryTask?.cancel()
+        remoteNowPlayingPollTask?.cancel()
     }
 
     func bootstrap() async {

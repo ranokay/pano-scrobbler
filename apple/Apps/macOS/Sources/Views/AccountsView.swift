@@ -10,7 +10,7 @@ struct AccountsView: View {
 
     private struct AccountDeletion: Identifiable {
         let id = UUID()
-        let index: Int
+        let accountId: UUID
         let account: UserAccount
     }
 
@@ -50,8 +50,10 @@ struct AccountsView: View {
             presenting: pendingDelete
         ) { deletion in
             Button("Remove Account", role: .destructive) {
-                withAnimation {
-                    model.removeAccounts(at: IndexSet(integer: deletion.index))
+                if let index = model.accounts.firstIndex(where: { $0.id == deletion.accountId }) {
+                    withAnimation {
+                        model.removeAccounts(at: IndexSet(integer: index))
+                    }
                 }
                 pendingDelete = nil
             }
@@ -82,18 +84,18 @@ struct AccountsView: View {
             ForEach(Array(model.accounts.enumerated()), id: \.element.id) { index, account in
                 AccountRow(
                     account: account,
-                    onDelete: { pendingDelete = AccountDeletion(index: index, account: account) }
+                    onDelete: { pendingDelete = AccountDeletion(accountId: account.id, account: account) }
                 )
                 .swipeActions(edge: .trailing, allowsFullSwipe: true) {
                     Button(role: .destructive) {
-                        pendingDelete = AccountDeletion(index: index, account: account)
+                        pendingDelete = AccountDeletion(accountId: account.id, account: account)
                     } label: {
                         Label("Remove", systemImage: "trash")
                     }
                 }
                 .contextMenu {
                     Button(role: .destructive) {
-                        pendingDelete = AccountDeletion(index: index, account: account)
+                        pendingDelete = AccountDeletion(accountId: account.id, account: account)
                     } label: {
                         Label("Remove Account", systemImage: "trash")
                     }

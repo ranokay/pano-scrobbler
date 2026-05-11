@@ -176,18 +176,22 @@ struct AsyncArtwork: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .task(id: taskID) {
+            let localTaskID = taskID
             await MainActor.run {
                 self.resolved = nil
                 self.image = nil
             }
             let url = await cache.resolve(subject, hint: hint)
+            guard !Task.isCancelled, taskID == localTaskID else { return }
             guard let url, let data = await cache.imageData(for: url), let image = NSImage(data: data) else {
+                guard !Task.isCancelled, taskID == localTaskID else { return }
                 await MainActor.run {
                     self.resolved = url
                     self.image = nil
                 }
                 return
             }
+            guard !Task.isCancelled, taskID == localTaskID else { return }
             await MainActor.run {
                 self.resolved = url
                 self.image = image

@@ -5,7 +5,7 @@ public final class AppleScriptNowPlayingProvider: NowPlayingProvider, @unchecked
     private let pollInterval: TimeInterval
 
     public init(pollInterval: TimeInterval = 3) {
-        self.pollInterval = pollInterval
+        self.pollInterval = max(0, pollInterval)
     }
 
     public func events() -> AsyncStream<PlaybackEvent> {

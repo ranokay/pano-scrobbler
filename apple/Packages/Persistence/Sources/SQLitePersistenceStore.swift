@@ -98,6 +98,10 @@ public final class SQLitePersistenceStore: PendingScrobbleStore, @unchecked Send
     }
 
     private func loadLocked(limit: Int) throws -> [PendingScrobble] {
+        guard limit >= 0, limit <= Int32.max else {
+            throw SQLiteStoreError.message("Load limit must be between 0 and \(Int32.max).")
+        }
+
         let statement = try prepare(
             """
             SELECT id, event, created_at, payload, account_id, account_type, last_error

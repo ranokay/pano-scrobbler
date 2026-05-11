@@ -208,16 +208,17 @@ struct ImageSearchView: View {
         searchTask?.cancel()
         let q = query.trimmingCharacters(in: .whitespaces)
         guard !q.isEmpty else {
+            isSearching = false
             results = []
             return
         }
 
         isSearching = true
         searchTask = Task {
+            defer { isSearching = false }
             let found = await service.search(query: q, limit: 15)
             guard !Task.isCancelled else { return }
             results = found
-            isSearching = false
         }
     }
 
