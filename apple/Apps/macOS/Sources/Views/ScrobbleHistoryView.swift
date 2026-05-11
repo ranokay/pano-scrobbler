@@ -34,7 +34,11 @@ struct ScrobbleHistoryView: View {
         }
         .task {
             // Refresh remote nowplaying when entering, so the top section is fresh.
+            model.startRemoteNowPlayingPolling()
             await model.refreshRemoteNowPlaying()
+        }
+        .onDisappear {
+            model.stopRemoteNowPlayingPolling()
         }
         .onAppear {
             if model.scrobbleHistory.isEmpty {
@@ -70,12 +74,6 @@ struct ScrobbleHistoryView: View {
         }
 
         for entry in model.remoteNowPlaying {
-            // Skip duplicates if Mac is also playing the same thing.
-            if let local = model.status.data,
-               model.status.state == .playing,
-               entry.matchesLocal(local) {
-                continue
-            }
             live.append(LiveTrack(
                 id: entry.id,
                 source: "\(entry.sourceDisplayName) · \(entry.username)",

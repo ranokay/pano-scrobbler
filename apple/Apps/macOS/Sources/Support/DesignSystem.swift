@@ -296,21 +296,38 @@ struct PulsingDot: View {
     @State private var pulse = false
 
     var body: some View {
-        Circle()
-            .fill(color)
-            .frame(width: size, height: size)
-            .overlay {
+        ZStack {
+            if isPulsing {
                 Circle()
                     .stroke(color.opacity(0.4), lineWidth: 2)
                     .scaleEffect(pulse ? 2.0 : 1.0)
                     .opacity(pulse ? 0.0 : 0.6)
             }
-            .onAppear {
-                guard isPulsing else { return }
-                withAnimation(.easeInOut(duration: 1.2).repeatForever(autoreverses: false)) {
+
+            Circle()
+                .fill(color)
+                .frame(width: size, height: size)
+        }
+        .frame(width: size * 2, height: size * 2)
+        .onAppear {
+            updatePulse()
+        }
+        .onChange(of: isPulsing) {
+            updatePulse()
+        }
+    }
+
+    private func updatePulse() {
+        if isPulsing {
+            pulse = false
+            DispatchQueue.main.async {
+                withAnimation(.easeOut(duration: 1.2).repeatForever(autoreverses: false)) {
                     pulse = true
                 }
             }
+        } else {
+            pulse = false
+        }
     }
 }
 
@@ -321,19 +338,14 @@ extension PlaybackState {
     var indicatorColor: Color {
         switch self {
         case .playing: .green
-        case .paused: .orange
-        case .stopped: .red
-        case .none, .waiting: .secondary
+        case .paused, .stopped, .none, .waiting: .secondary
         }
     }
 
     var displayLabel: String {
         switch self {
         case .playing: "Scrobbling"
-        case .paused: "Paused"
-        case .stopped: "Stopped"
-        case .none: "Idle"
-        case .waiting: "Waiting"
+        case .paused, .stopped, .none, .waiting: "Idle"
         }
     }
 }

@@ -8,7 +8,7 @@ public struct RemoteNowPlayingEntry: Identifiable, Equatable, Sendable {
         case listenBrainz
     }
 
-    public var id: String { "\(source.rawValue)|\(username)|\(artist)|\(track)" }
+    public var id: String
     public var source: Source
     public var username: String
     public var artist: String
@@ -19,6 +19,7 @@ public struct RemoteNowPlayingEntry: Identifiable, Equatable, Sendable {
     public var since: Date?
 
     public init(
+        id: String? = nil,
         source: Source,
         username: String,
         artist: String,
@@ -34,6 +35,7 @@ public struct RemoteNowPlayingEntry: Identifiable, Equatable, Sendable {
         self.album = album
         self.artworkURL = artworkURL
         self.since = since
+        self.id = id ?? "\(source.rawValue)|\(username)|\(artist)|\(track)"
     }
 
     public var sourceDisplayName: String {

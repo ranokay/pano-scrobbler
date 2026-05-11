@@ -9,14 +9,10 @@ struct NowPlayingView: View {
             VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
                 localCard
                 if !visibleRemoteEntries.isEmpty {
-                    sectionTitle("Playing on Other Devices")
+                    sectionTitle("Current Scrobblings")
                     ForEach(visibleRemoteEntries) { entry in
                         remoteCard(entry)
                     }
-                }
-                metricsRow
-                if model.status.data != nil {
-                    trackDetails
                 }
             }
             .padding(Layout.windowPadding)
@@ -44,6 +40,9 @@ struct NowPlayingView: View {
         .task {
             model.startRemoteNowPlayingPolling()
         }
+        .task(id: localRefreshID) {
+            await model.refreshRemoteNowPlaying()
+        }
         .onDisappear {
             model.stopRemoteNowPlayingPolling()
         }
@@ -51,12 +50,15 @@ struct NowPlayingView: View {
 
     // MARK: - Computed
 
-    /// Remote entries minus any that duplicate what's playing locally on the Mac.
     private var visibleRemoteEntries: [RemoteNowPlayingEntry] {
-        guard let local = model.status.data, model.status.state == .playing else {
-            return model.remoteNowPlaying
-        }
-        return model.remoteNowPlaying.filter { !$0.matchesLocal(local) }
+        model.remoteNowPlaying
+    }
+
+    private var localRefreshID: String {
+        [
+            model.status.state.rawValue,
+            model.status.data?.stableIdentity ?? "none"
+        ].joined(separator: "|")
     }
 
     private var navSubtitle: String {
@@ -79,7 +81,7 @@ struct NowPlayingView: View {
 
     @ViewBuilder
     private var localCard: some View {
-        if let data = model.status.data {
+        if let data = model.status.data, model.status.state == .playing {
             HStack(spacing: Layout.sectionSpacing) {
                 localArtwork(for: data)
                 trackInfo(
@@ -89,10 +91,7 @@ struct NowPlayingView: View {
                     source: "This Mac" + (data.appName.map { " · \($0)" } ?? "")
                 )
                 Spacer(minLength: 0)
-                AnimatedEqualizer(
-                    isPlaying: model.status.state == .playing,
-                    color: .accentColor
-                )
+                PulsingDot(color: .green, size: 9, isPulsing: true)
             }
             .heroGlass()
             .transition(.blurReplace)
@@ -199,98 +198,4 @@ struct NowPlayingView: View {
         .transition(.blurReplace)
     }
 
-    // MARK: - Metrics
-
-    private var metricsRow: some View {
-        GroupBox {
-            Grid(horizontalSpacing: Layout.sectionSpacing, verticalSpacing: 0) {
-                GridRow {
-                    metric(
-                        icon: "circle.fill",
-                        iconColor: model.status.state.indicatorColor,
-                        title: "State",
-                        value: model.status.state.displayLabel
-                    )
-                    Divider()
-                    metric(
-                        icon: "person.2.fill",
-                        iconColor: .secondary,
-                        title: "Accounts",
-                        value: "\(model.accounts.filter(\.enabled).count)"
-                    )
-                    Divider()
-                    metric(
-                        icon: "tray.full.fill",
-                        iconColor: model.pendingCount > 0 ? .orange : .secondary,
-                        title: "Pending",
-                        value: "\(model.pendingCount)"
-                    )
-                }
-            }
-            .padding(.vertical, 4)
-        }
-    }
-
-    private func metric(icon: String, iconColor: Color, title: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 4) {
-                Image(systemName: icon)
-                    .font(.caption2)
-                    .foregroundStyle(iconColor)
-                Text(title)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .textCase(.uppercase)
-            }
-
-            Text(value)
-                .font(.title3.weight(.semibold))
-                .monospacedDigit()
-                .contentTransition(.numericText())
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
-    // MARK: - Track Details
-
-    @ViewBuilder
-    private var trackDetails: some View {
-        if let data = model.status.data {
-            GroupBox("Track Details") {
-                VStack(spacing: 0) {
-                    detailRow("Album", value: data.album ?? "—")
-                    Divider()
-                    detailRow("Album Artist", value: data.albumArtist ?? "—")
-                    Divider()
-                    detailRow("App", value: data.appName ?? data.appID ?? "—")
-                    Divider()
-                    detailRow("Started", value: data.timestamp.formatted(date: .omitted, time: .standard))
-                    if let duration = data.duration {
-                        Divider()
-                        detailRow("Duration", value: formatDuration(duration))
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-        }
-    }
-
-    private func detailRow(_ label: String, value: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: Layout.sectionSpacing) {
-            Text(label)
-                .foregroundStyle(.secondary)
-                .frame(width: 120, alignment: .leading)
-            Text(value)
-                .textSelection(.enabled)
-            Spacer()
-        }
-        .font(.callout)
-        .padding(.vertical, 6)
-    }
-
-    private func formatDuration(_ seconds: TimeInterval) -> String {
-        let mins = Int(seconds) / 60
-        let secs = Int(seconds) % 60
-        return String(format: "%d:%02d", mins, secs)
-    }
 }

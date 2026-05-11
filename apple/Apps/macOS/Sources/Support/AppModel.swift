@@ -579,17 +579,35 @@ final class AppModel: ObservableObject {
     }
 
     var lastFMService: LastFMService? {
-        guard let account = accounts.first(where: { $0.type == .lastFM }) else { return nil }
+        guard let account = accounts.first(where: { $0.enabled && $0.type == .lastFM }) else { return nil }
         guard let creds = try? secretStore.loadCredentialsSync(reference: account.credentialReference) else { return nil }
         return try? LastFMService(account: account, credentials: creds)
     }
 
     var listenBrainzService: ListenBrainzService? {
         guard let account = accounts.first(where: {
-            $0.type == .listenBrainz || $0.type == .customListenBrainz
+            $0.enabled && ($0.type == .listenBrainz || $0.type == .customListenBrainz)
         }) else { return nil }
         guard let creds = try? secretStore.loadCredentialsSync(reference: account.credentialReference) else { return nil }
         return try? ListenBrainzService(account: account, credentials: creds)
+    }
+
+    var lastFMServices: [LastFMService] {
+        accounts.compactMap { account in
+            guard account.enabled else { return nil }
+            guard [.lastFM, .libreFM, .gnuFM].contains(account.type) else { return nil }
+            guard let creds = try? secretStore.loadCredentialsSync(reference: account.credentialReference) else { return nil }
+            return try? LastFMService(account: account, credentials: creds)
+        }
+    }
+
+    var listenBrainzServices: [ListenBrainzService] {
+        accounts.compactMap { account in
+            guard account.enabled else { return nil }
+            guard account.type == .listenBrainz || account.type == .customListenBrainz else { return nil }
+            guard let creds = try? secretStore.loadCredentialsSync(reference: account.credentialReference) else { return nil }
+            return try? ListenBrainzService(account: account, credentials: creds)
+        }
     }
 
     // MARK: - Remote Now Playing
@@ -622,12 +640,13 @@ final class AppModel: ObservableObject {
 
         var entries: [RemoteNowPlayingEntry] = []
 
-        // Last.fm: nowplaying lives at the head of getRecentTracks.
-        if let service = lastFMService {
+        // Last.fm-compatible services: nowplaying lives at the head of getRecentTracks.
+        for service in lastFMServices {
             do {
-                let result = try await service.getRecents(limit: 1)
-                if let track = result.entries.first(where: { $0.isNowPlaying }) {
+                let result = try await service.getRecents(limit: 10)
+                for (index, track) in result.entries.filter(\.isNowPlaying).enumerated() {
                     entries.append(RemoteNowPlayingEntry(
+                        id: "lastfm|\(service.account.id.uuidString)|\(index)|\(track.artist.name)|\(track.name)",
                         source: .lastFM,
                         username: service.account.username,
                         artist: track.artist.name,
@@ -638,15 +657,17 @@ final class AppModel: ObservableObject {
                     ))
                 }
             } catch {
-                appendLog("Last.fm nowplaying refresh failed: \(error.localizedDescription)")
+                appendLog("\(service.account.type.displayName) nowplaying refresh failed: \(error.localizedDescription)")
             }
         }
 
         // ListenBrainz: dedicated /playing-now endpoint.
-        if let service = listenBrainzService {
+        for service in listenBrainzServices {
             do {
-                if let listen = try await service.getPlayingNow() {
+                let listens = try await service.getPlayingNow()
+                for (index, listen) in listens.enumerated() {
                     entries.append(RemoteNowPlayingEntry(
+                        id: "listenbrainz|\(service.account.id.uuidString)|\(index)|\(listen.track_metadata.artist_name)|\(listen.track_metadata.track_name)",
                         source: .listenBrainz,
                         username: service.account.username,
                         artist: listen.track_metadata.artist_name,
@@ -657,7 +678,7 @@ final class AppModel: ObservableObject {
                     ))
                 }
             } catch {
-                appendLog("ListenBrainz nowplaying refresh failed: \(error.localizedDescription)")
+                appendLog("\(service.account.type.displayName) nowplaying refresh failed: \(error.localizedDescription)")
             }
         }
 

@@ -28,8 +28,7 @@ public final class StatusItemController: NSObject {
             let iconName: String
             switch status.state {
             case .playing: iconName = "music.note.list"
-            case .paused: iconName = "pause.circle"
-            case .stopped, .none, .waiting: iconName = "music.note"
+            case .paused, .stopped, .none, .waiting: iconName = "music.note"
             }
             button.image = NSImage(systemSymbolName: iconName, accessibilityDescription: nil)
             button.imagePosition = .imageLeading
@@ -56,7 +55,7 @@ public final class StatusItemController: NSObject {
     private func rebuildMenu() {
         let menu = NSMenu()
 
-        if let data = currentStatus.data {
+        if let data = currentStatus.data, currentStatus.state == .playing {
             // Track info
             let trackItem = NSMenuItem(title: "♫ \(data.track)", action: nil, keyEquivalent: "")
             trackItem.isEnabled = false
@@ -111,7 +110,7 @@ public final class StatusItemController: NSObject {
     }
 
     private func tooltip(for status: NowPlayingStatus) -> String {
-        guard let data = status.data else {
+        guard let data = status.data, status.state == .playing else {
             return "\(appName) — No track playing"
         }
 

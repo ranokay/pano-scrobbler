@@ -52,14 +52,13 @@ public struct ListenBrainzService: ScrobbleService {
 
     // MARK: - Read Operations
 
-    /// Get the currently-playing track for a user (if any).
-    /// Returns nil if no track is currently playing.
-    public func getPlayingNow(username: String? = nil) async throws -> LBListen? {
+    /// Get the currently-playing track(s) for a user.
+    public func getPlayingNow(username: String? = nil) async throws -> [LBListen] {
         let user = username ?? account.username
         let url = apiRoot.appendingPathComponent("1/user/\(user)/playing-now")
         let data = try await get(url)
         let response = try JSONDecoder().decode(LBPlayingNowResponse.self, from: data)
-        return response.payload.listens.first
+        return response.payload.listens
     }
 
     /// Get recent listens for a user.
