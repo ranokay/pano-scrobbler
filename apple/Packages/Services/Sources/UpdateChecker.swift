@@ -36,10 +36,14 @@ public struct UpdateChecker: Sendable {
             let latestVersion = release.tag_name.trimmingCharacters(in: CharacterSet.letters.union(.punctuationCharacters))
 
             if latestVersion.compare(currentVersion, options: .numeric) == .orderedDescending {
+                let dmgAsset = release.assets?.first { asset in
+                    asset.name.lowercased().hasSuffix(".dmg") ||
+                        asset.content_type?.lowercased().contains("diskimage") == true
+                }
                 return UpdateInfo(
                     version: release.tag_name,
                     changelog: release.body ?? "",
-                    downloadURL: URL(string: release.html_url),
+                    downloadURL: dmgAsset.flatMap { URL(string: $0.browser_download_url) },
                     publishedAt: release.published_at
                 )
             }
@@ -66,4 +70,11 @@ private struct GitHubRelease: Codable {
     let body: String?
     let html_url: String
     let published_at: String?
+    let assets: [GitHubAsset]?
+}
+
+private struct GitHubAsset: Codable {
+    let name: String
+    let browser_download_url: String
+    let content_type: String?
 }

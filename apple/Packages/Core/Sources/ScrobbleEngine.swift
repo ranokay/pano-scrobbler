@@ -24,6 +24,37 @@ public struct PendingRetrySummary: Equatable, Sendable {
     }
 }
 
+public struct ManualScrobbleSummary: Equatable, Sendable {
+    public var attempted: Int
+    public var succeeded: Int
+    public var failed: Int
+    public var messages: [String]
+
+    public init(attempted: Int = 0, succeeded: Int = 0, failed: Int = 0, messages: [String] = []) {
+        self.attempted = attempted
+        self.succeeded = succeeded
+        self.failed = failed
+        self.messages = messages
+    }
+
+    public var isSuccess: Bool {
+        attempted > 0 && failed == 0
+    }
+
+    public var displayMessage: String {
+        if !messages.isEmpty {
+            return messages.joined(separator: "\n")
+        }
+        if attempted == 0 {
+            return "No services configured."
+        }
+        if failed == 0 {
+            return "\(succeeded) service(s) succeeded."
+        }
+        return "\(succeeded) succeeded, \(failed) failed."
+    }
+}
+
 private struct NotificationPolicy: Sendable {
     var notifyOnScrobble: Bool
     var notifyOnNowPlaying: Bool
@@ -155,8 +186,15 @@ public actor ScrobbleEngine {
                 summary.succeeded += 1
                 await notify(.scrobbled(item.data))
             } else {
-                try? await pendingStore.remove(id: item.id)
-                await enqueueFailures(failedServices, data: item.data, event: item.event, createdAt: item.createdAt)
+                let enqueued = await enqueueFailures(
+                    failedServices,
+                    data: item.data,
+                    event: item.event,
+                    createdAt: item.createdAt
+                )
+                if enqueued {
+                    try? await pendingStore.remove(id: item.id)
+                }
                 summary.failed += 1
             }
         }
@@ -212,11 +250,19 @@ public actor ScrobbleEngine {
             }
         }
 
-        for sessionID in sessions.keys where !validIDs.contains(sessionID) {
+        let staleSessionIDs = sessions.keys.filter { !validIDs.contains($0) }
+        for sessionID in staleSessionIDs {
             if let identity = sessions[sessionID]?.lastIdentity {
                 cancelTask(identity: identity)
             }
             sessions.removeValue(forKey: sessionID)
+        }
+
+        if let currentAppID = nowPlayingStatus.data?.appID,
+           !sessions.values.contains(where: { $0.session.appID == currentAppID }) {
+            nowPlayingStatus = NowPlayingStatus(state: .none)
+        } else if sessions.isEmpty {
+            nowPlayingStatus = NowPlayingStatus(state: .none)
         }
     }
 
@@ -230,7 +276,7 @@ public actor ScrobbleEngine {
 
         let rawIdentity = rawData.stableIdentity
 
-        guard preferences.shouldScrobble(appID: tracker.session.appID) else {
+        guard preferences.shouldScrobble(appID: tracker.session.appID, trackURL: rawData.trackURL) else {
             cancelPreviousIdentity(sessionID: tracker.session.id, replacementIdentity: nil)
             sessions[tracker.session.id]?.lastIdentity = nil
             nowPlayingStatus = NowPlayingStatus(state: .none)
@@ -311,6 +357,13 @@ public actor ScrobbleEngine {
             scrobbleTasks.removeValue(forKey: identity)
         }
 
+        guard preferences.scrobblerEnabled,
+              preferences.shouldScrobble(appID: data.appID ?? "", trackURL: data.trackURL)
+        else {
+            await notify(.blocked(data, "Scrobbling disabled or source no longer allowed."))
+            return
+        }
+
         let active = activeServices()
         guard !active.isEmpty else {
             await notify(.failed(data, "No services configured."))
@@ -321,16 +374,16 @@ public actor ScrobbleEngine {
         if failedServices.isEmpty {
             await notify(.scrobbled(data))
         } else {
-            await enqueueFailures(failedServices, data: data)
+            _ = await enqueueFailures(failedServices, data: data)
             await notify(.failed(data, failedServices.map(\.message).joined(separator: "\n")))
         }
     }
 
     /// Submit a manual scrobble directly to all active services (no delay/scheduling).
-    public func scrobbleManually(_ data: ScrobbleData) async -> String {
+    public func scrobbleManually(_ data: ScrobbleData) async -> ManualScrobbleSummary {
         let active = activeServices()
         guard !active.isEmpty else {
-            return "No services configured."
+            return ManualScrobbleSummary(messages: ["No services configured."])
         }
 
         let failedServices = await scrobble(data, services: active)
@@ -338,10 +391,20 @@ public actor ScrobbleEngine {
 
         if failedServices.isEmpty {
             await notify(.scrobbled(data))
-            return "\(succeeded) service(s) succeeded."
+            return ManualScrobbleSummary(
+                attempted: active.count,
+                succeeded: succeeded,
+                failed: 0,
+                messages: ["\(succeeded) service(s) succeeded."]
+            )
         } else {
-            await enqueueFailures(failedServices, data: data)
-            return "\(succeeded) succeeded, \(failedServices.count) failed."
+            _ = await enqueueFailures(failedServices, data: data)
+            return ManualScrobbleSummary(
+                attempted: active.count,
+                succeeded: succeeded,
+                failed: failedServices.count,
+                messages: failedServices.map(\.message)
+            )
         }
     }
 
@@ -409,19 +472,25 @@ public actor ScrobbleEngine {
         data: ScrobbleData,
         event: String = "scrobble",
         createdAt: Date = Date()
-    ) async {
+    ) async -> Bool {
+        var allSucceeded = true
         for failure in failures {
-            try? await pendingStore.enqueue(
-                PendingScrobble(
-                    data: data,
-                    event: event,
-                    createdAt: createdAt,
-                    accountID: failure.account.id,
-                    accountType: failure.account.type,
-                    lastError: failure.message
+            do {
+                try await pendingStore.enqueue(
+                    PendingScrobble(
+                        data: data,
+                        event: event,
+                        createdAt: createdAt,
+                        accountID: failure.account.id,
+                        accountType: failure.account.type,
+                        lastError: failure.message
+                    )
                 )
-            )
+            } catch {
+                allSucceeded = false
+            }
         }
+        return allSucceeded
     }
 
     private func notify(_ notification: ScrobbleNotification) async {

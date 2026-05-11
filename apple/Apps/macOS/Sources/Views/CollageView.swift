@@ -173,6 +173,11 @@ struct CollageView: View {
             return
         }
 
+        let config = URLSessionConfiguration.default
+        config.timeoutIntervalForRequest = 15
+        config.timeoutIntervalForResource = 30
+        let session = URLSession(configuration: config)
+
         isGenerating = true
         error = nil
         generatedImage = nil
@@ -203,7 +208,7 @@ struct CollageView: View {
             for (index, entry) in artworkURLs.prefix(limit).enumerated() {
                 var img: NSImage?
                 if let url = entry.url {
-                    let (data, _) = try await URLSession.shared.data(from: url)
+                    let (data, _) = try await session.data(from: url)
                     img = NSImage(data: data)
                 }
 
@@ -355,11 +360,26 @@ struct CollageView: View {
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
-        if let tiffData = image.tiffRepresentation,
-           let bitmap = NSBitmapImageRep(data: tiffData),
-           let pngData = bitmap.representation(using: .png, properties: [:]) {
-            try? pngData.write(to: url)
+        guard let tiffData = image.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiffData),
+              let pngData = bitmap.representation(using: .png, properties: [:]) else {
+            showSaveError("Could not encode the collage image.")
+            return
         }
+
+        do {
+            try pngData.write(to: url)
+        } catch {
+            showSaveError("Could not save collage: \(error.localizedDescription)")
+        }
+    }
+
+    private func showSaveError(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "Save Failed"
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.runModal()
     }
 
     private func shareCollage() {

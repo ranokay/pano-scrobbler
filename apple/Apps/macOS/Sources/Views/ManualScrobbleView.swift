@@ -14,7 +14,7 @@ struct ManualScrobbleView: View {
     @State private var result: SubmitResult?
 
     enum SubmitResult {
-        case success
+        case success(String)
         case error(String)
     }
 
@@ -49,8 +49,8 @@ struct ManualScrobbleView: View {
                 Section {
                     if let result {
                         switch result {
-                        case .success:
-                            Label("Scrobble submitted successfully!", systemImage: "checkmark.circle.fill")
+                        case .success(let message):
+                            Label(message, systemImage: "checkmark.circle.fill")
                                 .foregroundStyle(.green)
                         case .error(let message):
                             Label(message, systemImage: "exclamationmark.triangle.fill")
@@ -117,10 +117,10 @@ struct ManualScrobbleView: View {
             timestamp: useCustomTimestamp ? timestamp : Date()
         )
 
-        await model.manualScrobble(data)
+        let summary = await model.manualScrobble(data)
 
         withAnimation(.spring(duration: 0.3)) {
-            result = .success
+            result = summary.isSuccess ? .success(summary.displayMessage) : .error(summary.displayMessage)
         }
 
         isSubmitting = false

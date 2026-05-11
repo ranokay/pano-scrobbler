@@ -108,3 +108,39 @@ private let testSQLiteTransient = unsafeBitCast(-1, to: sqlite3_destructor_type.
     #expect(item.accountType == nil)
     #expect(item.lastError == "legacy error")
 }
+
+@Test func sqlitePendingStoreSkipsCorruptPayloadRows() async throws {
+    let url = FileManager.default.temporaryDirectory
+        .appendingPathComponent(UUID().uuidString)
+        .appendingPathComponent("corrupt-pano.sqlite")
+    let store = try SQLitePersistenceStore(fileURL: url)
+    let valid = PendingScrobble(data: ScrobbleData(artist: "Valid", track: "Track"))
+    try await store.enqueue(valid)
+
+    var database: OpaquePointer?
+    #expect(sqlite3_open_v2(url.path, &database, SQLITE_OPEN_READWRITE, nil) == SQLITE_OK)
+    defer { sqlite3_close(database) }
+
+    var statement: OpaquePointer?
+    #expect(sqlite3_prepare_v2(
+        database,
+        "INSERT INTO pending_scrobbles (id, event, created_at, payload, account_id, account_type, last_error) VALUES (?, ?, ?, ?, ?, ?, ?);",
+        -1,
+        &statement,
+        nil
+    ) == SQLITE_OK)
+    sqlite3_bind_text(statement, 1, UUID().uuidString, -1, testSQLiteTransient)
+    sqlite3_bind_text(statement, 2, "scrobble", -1, testSQLiteTransient)
+    sqlite3_bind_double(statement, 3, 1)
+    sqlite3_bind_text(statement, 4, #"{"artist":42}"#, -1, testSQLiteTransient)
+    sqlite3_bind_null(statement, 5)
+    sqlite3_bind_null(statement, 6)
+    sqlite3_bind_text(statement, 7, "corrupt", -1, testSQLiteTransient)
+    #expect(sqlite3_step(statement) == SQLITE_DONE)
+    sqlite3_finalize(statement)
+
+    let loaded = try await store.load(limit: 10)
+
+    #expect(loaded.count == 1)
+    #expect(loaded.first?.id == valid.id)
+}

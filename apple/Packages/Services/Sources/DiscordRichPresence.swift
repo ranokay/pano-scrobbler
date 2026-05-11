@@ -21,7 +21,7 @@ public final class DiscordRichPresence: @unchecked Sendable {
     }
 
     deinit {
-        disconnect()
+        closeSocket()
     }
 
     // MARK: - Public API
@@ -92,10 +92,6 @@ public final class DiscordRichPresence: @unchecked Sendable {
             }
             activity["assets"] = assets
 
-            if let album, !album.isEmpty {
-                activity["assets"] = assets
-            }
-
             let payload: [String: Any] = [
                 "cmd": "SET_ACTIVITY",
                 "args": ["pid": ProcessInfo.processInfo.processIdentifier, "activity": activity],
@@ -124,10 +120,7 @@ public final class DiscordRichPresence: @unchecked Sendable {
     /// Disconnect from Discord.
     public func disconnect() {
         queue.async { [self] in
-            guard isConnected else { return }
-            close(socket)
-            socket = -1
-            isConnected = false
+            closeSocket()
         }
     }
 
@@ -204,6 +197,16 @@ public final class DiscordRichPresence: @unchecked Sendable {
         return sendFrame(opcode: 0, data: payload)
     }
 
+    private func closeSocket() {
+        guard socket >= 0 else {
+            isConnected = false
+            return
+        }
+        close(socket)
+        socket = -1
+        isConnected = false
+    }
+
     @discardableResult
     private func sendFrame(opcode: UInt32, data: [String: Any]) -> Bool {
         guard let jsonData = try? JSONSerialization.data(withJSONObject: data) else { return false }
@@ -216,10 +219,26 @@ public final class DiscordRichPresence: @unchecked Sendable {
         }
 
         let frame = header + jsonData
-        let written = frame.withUnsafeBytes { ptr in
-            Darwin.write(socket, ptr.baseAddress!, frame.count)
-        }
+        return writeAll(frame)
+    }
 
-        return written == frame.count
+    private func writeAll(_ data: Data) -> Bool {
+        data.withUnsafeBytes { ptr in
+            guard let baseAddress = ptr.baseAddress else { return true }
+            var offset = 0
+
+            while offset < data.count {
+                let written = Darwin.write(socket, baseAddress.advanced(by: offset), data.count - offset)
+                if written > 0 {
+                    offset += written
+                } else if written == -1 && errno == EINTR {
+                    continue
+                } else {
+                    return false
+                }
+            }
+
+            return true
+        }
     }
 }

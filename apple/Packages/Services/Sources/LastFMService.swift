@@ -236,6 +236,45 @@ public struct LastFMService: ScrobbleService {
         )
     }
 
+    /// Search for artists by name.
+    public func searchArtists(query: String, page: Int = 1, limit: Int = 25) async throws -> [LastFMArtist] {
+        let params: [String: String] = [
+            "method": "artist.search",
+            "artist": query,
+            "page": String(page),
+            "limit": String(limit),
+        ]
+
+        let response: ArtistSearchResponse = try await callRead(params: params)
+        return response.results.artistmatches.artist
+    }
+
+    /// Search for albums by title.
+    public func searchAlbums(query: String, page: Int = 1, limit: Int = 25) async throws -> [LastFMAlbum] {
+        let params: [String: String] = [
+            "method": "album.search",
+            "album": query,
+            "page": String(page),
+            "limit": String(limit),
+        ]
+
+        let response: AlbumSearchResponse = try await callRead(params: params)
+        return response.results.albummatches.album
+    }
+
+    /// Search for tracks by title.
+    public func searchTracks(query: String, page: Int = 1, limit: Int = 25) async throws -> [LastFMTrack] {
+        let params: [String: String] = [
+            "method": "track.search",
+            "track": query,
+            "page": String(page),
+            "limit": String(limit),
+        ]
+
+        let response: TrackSearchResponse = try await callRead(params: params)
+        return response.results.trackmatches.track
+    }
+
     /// Fetch friends for a user.
     public func getFriends(
         username: String? = nil,
@@ -551,7 +590,10 @@ public enum LastFMAuth {
         if let object = try? JSONSerialization.jsonObject(with: response.data) as? [String: Any],
            let error = object["error"] as? Int {
             let message = object["message"] as? String ?? "Last.fm API error \(error)."
-            throw ScrobbleError.authPending(code: error, message: message)
+            if error == 14 {
+                throw ScrobbleError.authPending(code: error, message: message)
+            }
+            throw ScrobbleError.invalidResponse("Last.fm API error \(error): \(message)")
         }
 
         let session = try JSONDecoder().decode(SessionResponse.self, from: response.data)

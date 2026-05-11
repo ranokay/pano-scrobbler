@@ -12,9 +12,9 @@ struct SearchView: View {
         Group {
             if query.isEmpty {
                 ContentUnavailableView(
-                    "Search Your Library",
+                    "Search Last.fm",
                     systemImage: "magnifyingglass",
-                    description: Text("Type to search across your Last.fm artists, albums, and tracks.")
+                    description: Text("Type to search Last.fm artists, albums, and tracks.")
                 )
             } else if !model.isSearching
                 && model.searchArtists.isEmpty
@@ -54,9 +54,13 @@ struct SearchView: View {
             if !model.searchArtists.isEmpty {
                 Section("Artists") {
                     ForEach(model.searchArtists) { artist in
-                        SearchArtistRow(artist: artist)
-                            .contentShape(Rectangle())
-                            .onTapGesture { selectedArtist = artist }
+                        Button {
+                            selectedArtist = artist
+                        } label: {
+                            SearchArtistRow(artist: artist)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -64,9 +68,13 @@ struct SearchView: View {
             if !model.searchAlbums.isEmpty {
                 Section("Albums") {
                     ForEach(model.searchAlbums) { album in
-                        SearchAlbumRow(album: album)
-                            .contentShape(Rectangle())
-                            .onTapGesture { selectedAlbum = album }
+                        Button {
+                            selectedAlbum = album
+                        } label: {
+                            SearchAlbumRow(album: album)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }
@@ -74,9 +82,13 @@ struct SearchView: View {
             if !model.searchTracks.isEmpty {
                 Section("Tracks") {
                     ForEach(model.searchTracks) { track in
-                        SearchTrackRow(track: track)
-                            .contentShape(Rectangle())
-                            .onTapGesture { selectedTrack = track }
+                        Button {
+                            selectedTrack = track
+                        } label: {
+                            SearchTrackRow(track: track)
+                                .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
                     }
                 }
             }

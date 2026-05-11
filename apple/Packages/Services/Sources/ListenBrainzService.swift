@@ -193,7 +193,12 @@ public struct ListenBrainzService: ScrobbleService {
         // For simplicity, submit now-playing first to get msid
         let npData = ScrobbleData(artist: artist, track: track, timestamp: Date())
         let npBody = try Self.makePayload(npData, listenType: "playing_now")
-        let npURL = apiRoot.appendingPathComponent("1/submit-listens")
+        var npComponents = URLComponents(
+            url: apiRoot.appendingPathComponent("1/submit-listens"),
+            resolvingAgainstBaseURL: false
+        )!
+        npComponents.queryItems = [URLQueryItem(name: "return_msid", value: "true")]
+        let npURL = npComponents.url!
 
         let npResponse = try await httpClient.send(
             HTTPRequest(
@@ -207,32 +212,36 @@ public struct ListenBrainzService: ScrobbleService {
             )
         )
 
-        // Parse the msid from the response
-        if 200..<300 ~= npResponse.statusCode,
-           let json = try? JSONSerialization.jsonObject(with: npResponse.data) as? [String: Any],
-           let msid = json["recording_msid"] as? String {
-            // Submit feedback with msid
-            let feedbackBody = try JSONSerialization.data(
-                withJSONObject: ["recording_msid": msid, "score": score],
-                options: .sortedKeys
-            )
+        guard 200..<300 ~= npResponse.statusCode else {
+            throw ScrobbleError.invalidResponse("ListenBrainz now-playing returned HTTP \(npResponse.statusCode).")
+        }
 
-            let fbURL = apiRoot.appendingPathComponent("1/feedback/recording-feedback")
-            let fbResponse = try await httpClient.send(
-                HTTPRequest(
-                    url: fbURL,
-                    method: "POST",
-                    headers: [
-                        "Authorization": "Token \(token)",
-                        "Content-Type": "application/json"
-                    ],
-                    body: feedbackBody
-                )
-            )
+        guard let json = try? JSONSerialization.jsonObject(with: npResponse.data) as? [String: Any],
+              let msid = json["recording_msid"] as? String,
+              !msid.isEmpty else {
+            throw ScrobbleError.invalidResponse("ListenBrainz did not return a recording_msid for feedback.")
+        }
 
-            guard 200..<300 ~= fbResponse.statusCode else {
-                throw ScrobbleError.invalidResponse("ListenBrainz feedback returned HTTP \(fbResponse.statusCode).")
-            }
+        let feedbackBody = try JSONSerialization.data(
+            withJSONObject: ["recording_msid": msid, "score": score],
+            options: .sortedKeys
+        )
+
+        let fbURL = apiRoot.appendingPathComponent("1/feedback/recording-feedback")
+        let fbResponse = try await httpClient.send(
+            HTTPRequest(
+                url: fbURL,
+                method: "POST",
+                headers: [
+                    "Authorization": "Token \(token)",
+                    "Content-Type": "application/json"
+                ],
+                body: feedbackBody
+            )
+        )
+
+        guard 200..<300 ~= fbResponse.statusCode else {
+            throw ScrobbleError.invalidResponse("ListenBrainz feedback returned HTTP \(fbResponse.statusCode).")
         }
     }
 

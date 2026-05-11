@@ -33,6 +33,32 @@ import Testing
     #expect(result.scrobbleData.artist == "Blocked")
 }
 
+@Test func simpleEditPreservesAlbumFieldsWhenReplacementIsEmpty() {
+    let data = ScrobbleData(
+        artist: "Artist",
+        track: "Track",
+        album: "Original Album",
+        albumArtist: "Original Album Artist"
+    )
+    let pipeline = MetadataPipeline(
+        simpleEdits: [
+            SimpleEdit(
+                matchArtist: "Artist",
+                matchTrack: "Track",
+                replacementArtist: "Edited Artist",
+                replacementAlbum: nil,
+                replacementAlbumArtist: ""
+            )
+        ]
+    )
+
+    let result = pipeline.preprocess(data)
+
+    #expect(result.scrobbleData.artist == "Edited Artist")
+    #expect(result.scrobbleData.album == "Original Album")
+    #expect(result.scrobbleData.albumArtist == "Original Album Artist")
+}
+
 @Test func engineRetriesPendingScrobblesAndClearsSuccessfulItems() async throws {
     let store = InMemoryPendingScrobbleStore()
     let data = ScrobbleData(artist: "Artist", track: "Track")
@@ -75,6 +101,19 @@ import Testing
 
     #expect(await engine.status() == NowPlayingStatus(state: .none))
     #expect(await presenter.notifications().isEmpty)
+}
+
+@Test func urlHostsCanAllowBrowserScrobbling() async {
+    let preferences = AppPreferences(allowedAppIDs: ["music.youtube.com"])
+
+    #expect(preferences.shouldScrobble(
+        appID: "com.google.Chrome",
+        trackURL: URL(string: "https://music.youtube.com/watch?v=abc")
+    ))
+    #expect(!preferences.shouldScrobble(
+        appID: "com.google.Chrome",
+        trackURL: URL(string: "https://www.youtube.com/watch?v=abc")
+    ))
 }
 
 @Test func stoppedPlaybackCancelsStatusAndPendingScrobble() async throws {
@@ -133,7 +172,8 @@ import Testing
     let engine = ScrobbleEngine()
     let summary = await engine.scrobbleManually(ScrobbleData(artist: "Artist", track: "Track"))
 
-    #expect(summary == "No services configured.")
+    #expect(!summary.isSuccess)
+    #expect(summary.displayMessage == "No services configured.")
 }
 
 @Test func partialServiceFailureRetriesOnlyFailedAccount() async throws {
@@ -153,7 +193,12 @@ import Testing
     let manualSummary = await engine.scrobbleManually(data)
     let pending = try await store.load(limit: 10)
 
-    #expect(manualSummary == "1 succeeded, 1 failed.")
+    #expect(manualSummary == ManualScrobbleSummary(
+        attempted: 2,
+        succeeded: 1,
+        failed: 1,
+        messages: ["ListenBrainz: failed"]
+    ))
     #expect(pending.count == 1)
     #expect(pending.first?.accountID == failedAccount.id)
     #expect(pending.first?.accountType == failedAccount.type)
@@ -186,6 +231,21 @@ import Testing
     #expect(try await store.load(limit: 10) == [pending])
 }
 
+@Test func retryPendingKeepsOriginalWhenReplacementCannotBeEnqueued() async throws {
+    let pending = PendingScrobble(data: ScrobbleData(artist: "Artist", track: "Track"))
+    let store = FailingEnqueuePendingStore(item: pending)
+    let engine = ScrobbleEngine(
+        services: [FailingScrobbleService(account: UserAccount(type: .lastFM, username: "fail"))],
+        pendingStore: store
+    )
+
+    let summary = await engine.retryPending()
+
+    #expect(summary == PendingRetrySummary(attempted: 1, succeeded: 0, failed: 1))
+    #expect(await store.didRemove == false)
+    #expect(try await store.load(limit: 10) == [pending])
+}
+
 @Test func retryPendingWithNoServicesDoesNotReportSuccess() async throws {
     let store = InMemoryPendingScrobbleStore()
     let pending = PendingScrobble(data: ScrobbleData(artist: "Artist", track: "Track"))
@@ -196,6 +256,31 @@ import Testing
 
     #expect(retrySummary == PendingRetrySummary(attempted: 1, succeeded: 0, failed: 1))
     #expect(try await store.load(limit: 10) == [pending])
+}
+
+@Test func delayedScrobbleRechecksPreferencesBeforeSubmitting() async throws {
+    let recorder = ScrobbleRecorder()
+    let service = RecordingScrobbleService(recorder: recorder)
+    let engine = ScrobbleEngine(
+        preferences: AppPreferences(
+            allowedAppIDs: ["com.example.Player"],
+            timing: ScrobbleTimingPreferences(delayPercent: 50, delaySeconds: 240, minimumDurationSeconds: 1)
+        ),
+        services: [service]
+    )
+
+    await engine.handle(.snapshot(
+        PlaybackSnapshot(
+            session: MediaSession(id: "session", appID: "com.example.Player", appName: "Player"),
+            metadata: PlaybackMetadata(title: "Track", artist: "Artist", duration: 10),
+            state: .playing,
+            position: 4.99
+        )
+    ))
+    await engine.updatePreferences(AppPreferences(scrobblerEnabled: false))
+    try await Task.sleep(nanoseconds: 150_000_000)
+
+    #expect(await recorder.scrobbleCount() == 0)
 }
 
 @Test func notificationPreferencesFilterNowPlayingAndScrobbledOnly() async {
@@ -244,6 +329,27 @@ private struct FailingScrobbleService: ScrobbleService {
 
     func scrobble(_ data: ScrobbleData) async throws -> ScrobbleResult {
         throw ScrobbleError.invalidResponse("failed")
+    }
+}
+
+private actor FailingEnqueuePendingStore: PendingScrobbleStore {
+    private var item: PendingScrobble
+    private(set) var didRemove = false
+
+    init(item: PendingScrobble) {
+        self.item = item
+    }
+
+    func enqueue(_ item: PendingScrobble) async throws {
+        throw ScrobbleError.invalidResponse("enqueue failed")
+    }
+
+    func load(limit: Int) async throws -> [PendingScrobble] {
+        [item]
+    }
+
+    func remove(id: UUID) async throws {
+        didRemove = true
     }
 }
 

@@ -28,10 +28,9 @@ tracking services of your choice such as Last.fm, Libre.fm, ListenBrainz and sel
 - On macOS, the app can use Automation permission to read now-playing metadata from Music and
   Spotify. This metadata is processed locally before being submitted only to the services you
   configure.
-- To fetch images of artists and albums, the name of the artist and album may be sent to artwork
-  providers. On macOS this includes Apple's iTunes Search API and Deezer. Other app variants may
-  use Spotify where that integration is available. This functionality is disabled by default for
-  fresh installations where the platform supports that preference.
+- Artwork lookup on macOS is manual-only. Artist, album, or track names are sent to artwork
+  providers such as Apple's iTunes Search API and Deezer only when you explicitly use the
+  Artwork Search tool. Other app variants may use Spotify where that integration is available.
 - To fetch the missing metadata while scrobbling Deezer on Windows, the app uses the Deezer API.
 - If Discord Rich Presence is enabled on desktop, the currently playing track metadata is sent to
   the local Discord desktop app through Discord IPC so Discord can display it as your status.

@@ -99,8 +99,8 @@ public struct SimpleEdit: Codable, Hashable, Identifiable, Sendable {
         var edited = data
         edited.artist = replacementArtist?.nilIfEmpty ?? edited.artist
         edited.track = replacementTrack?.nilIfEmpty ?? edited.track
-        edited.album = replacementAlbum
-        edited.albumArtist = replacementAlbumArtist
+        edited.album = replacementAlbum?.nilIfEmpty ?? edited.album
+        edited.albumArtist = replacementAlbumArtist?.nilIfEmpty ?? edited.albumArtist
         return edited.trimmed()
     }
 }

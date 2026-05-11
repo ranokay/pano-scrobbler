@@ -122,7 +122,12 @@ public final class SQLitePersistenceStore: PendingScrobbleStore, @unchecked Send
             }
 
             let createdAt = Date(timeIntervalSince1970: sqlite3_column_double(statement, 2))
-            let data = try decoder.decode(ScrobbleData.self, from: payloadData)
+            let data: ScrobbleData
+            do {
+                data = try decoder.decode(ScrobbleData.self, from: payloadData)
+            } catch {
+                continue
+            }
             let accountID = sqliteText(statement, column: 4).flatMap(UUID.init(uuidString:))
             let accountType = sqliteText(statement, column: 5).flatMap(AccountType.init(rawValue:))
             let error = sqliteText(statement, column: 6)

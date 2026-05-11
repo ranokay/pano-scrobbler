@@ -339,6 +339,42 @@ public struct TopTracksContainer: Codable, Sendable {
     }
 }
 
+public struct ArtistSearchResponse: Codable, Sendable {
+    public var results: ArtistSearchResults
+}
+
+public struct ArtistSearchResults: Codable, Sendable {
+    public var artistmatches: ArtistSearchMatches
+}
+
+public struct ArtistSearchMatches: Codable, Sendable {
+    public var artist: [LastFMArtist]
+}
+
+public struct AlbumSearchResponse: Codable, Sendable {
+    public var results: AlbumSearchResults
+}
+
+public struct AlbumSearchResults: Codable, Sendable {
+    public var albummatches: AlbumSearchMatches
+}
+
+public struct AlbumSearchMatches: Codable, Sendable {
+    public var album: [LastFMAlbum]
+}
+
+public struct TrackSearchResponse: Codable, Sendable {
+    public var results: TrackSearchResults
+}
+
+public struct TrackSearchResults: Codable, Sendable {
+    public var trackmatches: TrackSearchMatches
+}
+
+public struct TrackSearchMatches: Codable, Sendable {
+    public var track: [LastFMTrack]
+}
+
 public struct FriendsResponse: Codable, Sendable {
     public var friends: FriendsContainer
 }
@@ -575,7 +611,7 @@ public struct LastFMSimilarTrack: Codable, Identifiable, Sendable {
     public var artist: LastFMArtist?
     public var image: [LastFMImage]?
 
-    public var id: String { "\(artist?.name ?? "")|\\(name)".lowercased() }
+    public var id: String { "\(artist?.name ?? "")|\(name)".lowercased() }
 
     public var imageURL: URL? {
         image?.last(where: { !$0.url.isEmpty }).flatMap { URL(string: $0.url) }

@@ -70,8 +70,10 @@ struct ContentView: View {
                     .allowsHitTesting(false)
             }
         }
-        .onDrop(of: [.commaSeparatedText, .json, .plainText, .fileURL], isTargeted: $isDragOver) { providers in
-            handleDrop(providers)
+        .dropDestination(for: URL.self) { urls, _ in
+            handleDrop(urls)
+        } isTargeted: { targeted in
+            isDragOver = targeted
         }
     }
 
@@ -191,20 +193,11 @@ struct ContentView: View {
 
     // MARK: - Drag & Drop
 
-    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
-        for provider in providers {
-            if provider.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-                provider.loadItem(forTypeIdentifier: UTType.fileURL.identifier, options: nil) { item, _ in
-                    guard let data = item as? Data,
-                          let url = URL(dataRepresentation: data, relativeTo: nil) else { return }
-
-                    let ext = url.pathExtension.lowercased()
-                    if ["csv", "json", "txt"].contains(ext) {
-                        DispatchQueue.main.async {
-                            model.selectedSection = .fileScrobble
-                        }
-                    }
-                }
+    private func handleDrop(_ urls: [URL]) -> Bool {
+        for url in urls {
+            let ext = url.pathExtension.lowercased()
+            if ["csv", "json", "txt"].contains(ext) {
+                model.selectedSection = .fileScrobble
                 return true
             }
         }

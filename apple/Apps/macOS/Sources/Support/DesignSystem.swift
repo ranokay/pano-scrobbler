@@ -383,7 +383,9 @@ struct FlowLayout: SwiftUI.Layout {
     }
 
     private func computeLayout(proposal: ProposedViewSize, subviews: Subviews) -> FlowLayoutResult {
-        let maxWidth = proposal.width ?? .infinity
+        let maxWidth = proposal.width ?? subviews.reduce(CGFloat.zero) { width, subview in
+            width + subview.sizeThatFits(ProposedViewSize.unspecified).width + spacing
+        }
         var positions: [CGPoint] = []
         var currentX: CGFloat = 0
         var currentY: CGFloat = 0
@@ -406,7 +408,7 @@ struct FlowLayout: SwiftUI.Layout {
         }
 
         return FlowLayoutResult(
-            size: CGSize(width: maxWidth, height: totalHeight),
+            size: CGSize(width: max(currentX - spacing, maxWidth), height: totalHeight),
             positions: positions
         )
     }

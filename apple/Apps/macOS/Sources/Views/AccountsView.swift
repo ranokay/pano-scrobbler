@@ -339,8 +339,12 @@ private struct AddAccountSheet: View {
         Task {
             switch accountKind {
             case .listenBrainz:
-                await model.addListenBrainzAccount(username: username, token: token)
-                dismiss()
+                do {
+                    try await model.addListenBrainzAccount(username: username, token: token)
+                    dismiss()
+                } catch {
+                    authError = error.localizedDescription
+                }
 
             case .lastFM:
                 switch lastFMMode {
@@ -361,18 +365,26 @@ private struct AddAccountSheet: View {
                     isAuthenticating = false
 
                 case .manual:
-                    await model.addLastFMAccount(
-                        username: username,
-                        apiKey: apiKey,
-                        apiSecret: apiSecret,
-                        sessionKey: sessionKey
-                    )
-                    dismiss()
+                    do {
+                        try await model.addLastFMAccount(
+                            username: username,
+                            apiKey: apiKey,
+                            apiSecret: apiSecret,
+                            sessionKey: sessionKey
+                        )
+                        dismiss()
+                    } catch {
+                        authError = error.localizedDescription
+                    }
                 }
 
             case .file:
-                await model.addFileAccount(fileURL: URL(fileURLWithPath: filePath))
-                dismiss()
+                do {
+                    try await model.addFileAccount(fileURL: URL(fileURLWithPath: filePath))
+                    dismiss()
+                } catch {
+                    authError = error.localizedDescription
+                }
             }
         }
     }

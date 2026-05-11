@@ -234,14 +234,33 @@ struct ImageSearchView: View {
 
                 guard panel.runModal() == .OK, let saveURL = panel.url else { return }
 
-                if let tiffData = image.tiffRepresentation,
-                   let bitmap = NSBitmapImageRep(data: tiffData),
-                   let pngData = bitmap.representation(using: .png, properties: [:]) {
-                    try pngData.write(to: saveURL)
+                guard let tiffData = image.tiffRepresentation,
+                      let bitmap = NSBitmapImageRep(data: tiffData) else {
+                    showSaveError("Could not decode the image for saving.")
+                    return
                 }
+
+                let isJPEG = ["jpg", "jpeg"].contains(saveURL.pathExtension.lowercased())
+                let fileType: NSBitmapImageRep.FileType = isJPEG ? .jpeg : .png
+                let properties: [NSBitmapImageRep.PropertyKey: Any] = isJPEG ? [.compressionFactor: 0.9] : [:]
+
+                guard let imageData = bitmap.representation(using: fileType, properties: properties) else {
+                    showSaveError("Could not encode the selected image.")
+                    return
+                }
+
+                try imageData.write(to: saveURL)
             } catch {
-                // silently fail
+                showSaveError(error.localizedDescription)
             }
         }
+    }
+
+    private func showSaveError(_ message: String) {
+        let alert = NSAlert()
+        alert.messageText = "Save Failed"
+        alert.informativeText = message
+        alert.alertStyle = .warning
+        alert.runModal()
     }
 }

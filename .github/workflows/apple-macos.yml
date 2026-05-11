@@ -115,7 +115,7 @@ jobs:
             echo "version.txt does not contain a numeric version code" >&2
             exit 1
           fi
-          verName="$((10#$verCode / 100)).$((10#$verCode % 100))"
+          verName="$(printf '%d.%02d' "$((10#$verCode / 100))" "$((10#$verCode % 100))")"
           echo "verCode=$verCode" >> "$GITHUB_OUTPUT"
           echo "verName=$verName" >> "$GITHUB_OUTPUT"
 

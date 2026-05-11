@@ -65,6 +65,8 @@ final class AppModel: ObservableObject {
     private var engineTask: Task<Void, Never>?
     private var statusTask: Task<Void, Never>?
     private var retryTask: Task<Void, Never>?
+    private var cachedLastFMServices: [LastFMService] = []
+    private var cachedListenBrainzServices: [ListenBrainzService] = []
     private lazy var discordRPC: DiscordRichPresence? = {
         guard let clientID = AppConfiguration.discordClientID else { return nil }
         return DiscordRichPresence(clientId: clientID, appName: AppConfiguration.displayName)
@@ -144,6 +146,8 @@ final class AppModel: ObservableObject {
 
     func reloadServices() async {
         let services = await ScrobbleServiceFactory.makeServices(accounts: accounts, secretStore: secretStore)
+        cachedLastFMServices = services.compactMap { $0 as? LastFMService }
+        cachedListenBrainzServices = services.compactMap { $0 as? ListenBrainzService }
         await engine.updateServices(services)
         appendLog("Service reload completed: \(services.count) active service(s).")
     }
@@ -241,16 +245,16 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func addListenBrainzAccount(username: String, token: String) async {
-        await addAccount(
+    func addListenBrainzAccount(username: String, token: String) async throws {
+        try await addAccount(
             type: .listenBrainz,
             username: username,
             credentials: ServiceCredentials(token: token)
         )
     }
 
-    func addLastFMAccount(username: String, apiKey: String, apiSecret: String, sessionKey: String) async {
-        await addAccount(
+    func addLastFMAccount(username: String, apiKey: String, apiSecret: String, sessionKey: String) async throws {
+        try await addAccount(
             type: .lastFM,
             username: username,
             credentials: ServiceCredentials(apiKey: apiKey, apiSecret: apiSecret, sessionKey: sessionKey)
@@ -284,7 +288,7 @@ final class AppModel: ObservableObject {
                     token: token
                 )
 
-                await addLastFMAccount(
+                try await addLastFMAccount(
                     username: username,
                     apiKey: apiKey,
                     apiSecret: apiSecret,
@@ -301,8 +305,8 @@ final class AppModel: ObservableObject {
         throw ScrobbleError.invalidResponse("Authorization timed out. Please try again.")
     }
 
-    func addFileAccount(fileURL: URL) async {
-        await addAccount(
+    func addFileAccount(fileURL: URL) async throws {
+        try await addAccount(
             type: .file,
             username: fileURL.lastPathComponent,
             credentials: ServiceCredentials(fileURL: fileURL)
@@ -411,19 +415,15 @@ final class AppModel: ObservableObject {
         Task { await saveRules() }
     }
 
-    private func addAccount(type: AccountType, username: String, credentials: ServiceCredentials) async {
+    private func addAccount(type: AccountType, username: String, credentials: ServiceCredentials) async throws {
         let account = UserAccount(type: type, username: username.trimmingCharacters(in: .whitespacesAndNewlines))
 
-        do {
-            try await secretStore.saveCredentials(credentials, reference: account.credentialReference)
-            accounts.removeAll { $0.type == type && $0.username == account.username }
-            accounts.append(account)
-            try await accountStore.saveAccounts(accounts)
-            await reloadServices()
-            appendLog("Added \(type.displayName) account for \(account.username).")
-        } catch {
-            appendLog("Could not add account: \(error.localizedDescription)")
-        }
+        try await secretStore.saveCredentials(credentials, reference: account.credentialReference)
+        accounts.removeAll { $0.type == type && $0.username == account.username }
+        accounts.append(account)
+        try await accountStore.saveAccounts(accounts)
+        await reloadServices()
+        appendLog("Added \(type.displayName) account for \(account.username).")
     }
 
     private func startEngine() {
@@ -580,35 +580,19 @@ final class AppModel: ObservableObject {
     }
 
     var lastFMService: LastFMService? {
-        guard let account = accounts.first(where: { $0.enabled && $0.type == .lastFM }) else { return nil }
-        guard let creds = try? secretStore.loadCredentialsSync(reference: account.credentialReference) else { return nil }
-        return try? LastFMService(account: account, credentials: creds)
+        cachedLastFMServices.first { $0.account.type == .lastFM } ?? cachedLastFMServices.first
     }
 
     var listenBrainzService: ListenBrainzService? {
-        guard let account = accounts.first(where: {
-            $0.enabled && ($0.type == .listenBrainz || $0.type == .customListenBrainz)
-        }) else { return nil }
-        guard let creds = try? secretStore.loadCredentialsSync(reference: account.credentialReference) else { return nil }
-        return try? ListenBrainzService(account: account, credentials: creds)
+        cachedListenBrainzServices.first
     }
 
     var lastFMServices: [LastFMService] {
-        accounts.compactMap { account in
-            guard account.enabled else { return nil }
-            guard [.lastFM, .libreFM, .gnuFM].contains(account.type) else { return nil }
-            guard let creds = try? secretStore.loadCredentialsSync(reference: account.credentialReference) else { return nil }
-            return try? LastFMService(account: account, credentials: creds)
-        }
+        cachedLastFMServices
     }
 
     var listenBrainzServices: [ListenBrainzService] {
-        accounts.compactMap { account in
-            guard account.enabled else { return nil }
-            guard account.type == .listenBrainz || account.type == .customListenBrainz else { return nil }
-            guard let creds = try? secretStore.loadCredentialsSync(reference: account.credentialReference) else { return nil }
-            return try? ListenBrainzService(account: account, credentials: creds)
-        }
+        cachedListenBrainzServices
     }
 
     // MARK: - Remote Now Playing
@@ -746,9 +730,10 @@ final class AppModel: ObservableObject {
         }
     }
 
-    func manualScrobble(_ data: ScrobbleData) async {
+    func manualScrobble(_ data: ScrobbleData) async -> ManualScrobbleSummary {
         let summary = await engine.scrobbleManually(data)
-        appendLog("Manual scrobble: \(data.artist) — \(data.track) → \(summary)")
+        appendLog("Manual scrobble: \(data.artist) — \(data.track) → \(summary.displayMessage)")
+        return summary
     }
 
     // MARK: - Charts
@@ -837,29 +822,17 @@ final class AppModel: ObservableObject {
 
             guard let service = lastFMService else { return }
 
-            // Last.fm doesn't have a unified search endpoint with session key,
-            // so we search for the term in top results from user library
-            // For a proper search we'd need the unauthenticated API, but let's
-            // use the charts endpoint filtered client-side for now.
-            // TODO: Implement proper Last.fm search endpoints (artist.search, etc.)
             do {
-                // Use getTopArtists/Tracks with large limit and filter client-side
-                // This is a pragmatic first pass
-                async let artistsResult = service.getTopArtists(period: .overall, limit: 100)
-                async let tracksResult = service.getTopTracks(period: .overall, limit: 100)
-                async let albumsResult = service.getTopAlbums(period: .overall, limit: 100)
+                async let artistsResult = service.searchArtists(query: trimmed, limit: 25)
+                async let tracksResult = service.searchTracks(query: trimmed, limit: 25)
+                async let albumsResult = service.searchAlbums(query: trimmed, limit: 25)
 
                 let (ar, tr, al) = try await (artistsResult, tracksResult, albumsResult)
                 guard !Task.isCancelled else { return }
 
-                let q = trimmed.lowercased()
-                searchArtists = ar.entries.filter { $0.name.lowercased().contains(q) }
-                searchTracks = tr.entries.filter {
-                    $0.name.lowercased().contains(q) || $0.artist.name.lowercased().contains(q)
-                }
-                searchAlbums = al.entries.filter {
-                    $0.name.lowercased().contains(q) || ($0.artist?.name.lowercased().contains(q) ?? false)
-                }
+                searchArtists = ar
+                searchTracks = tr
+                searchAlbums = al
             } catch {
                 guard !Task.isCancelled else { return }
                 appendLog("Search failed: \(error.localizedDescription)")

@@ -9,6 +9,7 @@ struct FileScrobbleView: View {
     @State private var isImporting = false
     @State private var isSubmitting = false
     @State private var parseError: String?
+    @State private var submitError: String?
     @State private var submitResult: String?
     @State private var showFilePicker = false
 
@@ -23,6 +24,10 @@ struct FileScrobbleView: View {
                     }
 
                     if let error = parseError {
+                        errorBanner(error)
+                    }
+
+                    if let error = submitError {
                         errorBanner(error)
                     }
 
@@ -170,6 +175,7 @@ struct FileScrobbleView: View {
             Button {
                 importedScrobbles = []
                 parseError = nil
+                submitError = nil
                 submitResult = nil
             } label: {
                 Label("Clear", systemImage: "xmark")
@@ -197,7 +203,9 @@ struct FileScrobbleView: View {
 
     private func handleFileImport(_ result: Result<[URL], Error>) {
         parseError = nil
+        submitError = nil
         submitResult = nil
+        importedScrobbles = []
 
         switch result {
         case .success(let urls):
@@ -251,15 +259,26 @@ struct FileScrobbleView: View {
         var result: [String] = []
         var current = ""
         var inQuotes = false
-        for char in line {
+        var index = line.startIndex
+
+        while index < line.endIndex {
+            let char = line[index]
             if char == "\"" {
-                inQuotes.toggle()
+                let next = line.index(after: index)
+                if inQuotes, next < line.endIndex, line[next] == "\"" {
+                    current.append("\"")
+                    index = line.index(after: next)
+                    continue
+                } else {
+                    inQuotes.toggle()
+                }
             } else if char == "," && !inQuotes {
                 result.append(current)
                 current = ""
             } else {
                 current.append(char)
             }
+            index = line.index(after: index)
         }
         result.append(current)
         return result
@@ -294,16 +313,26 @@ struct FileScrobbleView: View {
 
     private func submitAll() async {
         isSubmitting = true
+        submitError = nil
         submitResult = nil
 
         var succeeded = 0
+        var failedMessages: [String] = []
         for data in importedScrobbles {
-            await model.manualScrobble(data)
-            succeeded += 1
+            let summary = await model.manualScrobble(data)
+            if summary.isSuccess {
+                succeeded += 1
+            } else {
+                failedMessages.append("\(data.artist) - \(data.track): \(summary.displayMessage)")
+            }
         }
 
         withAnimation(.spring(duration: 0.3)) {
-            submitResult = "Submitted \(succeeded) scrobble(s) to \(model.accounts.filter(\.enabled).count) service(s)."
+            if failedMessages.isEmpty {
+                submitResult = "Submitted \(succeeded) scrobble(s) to \(model.accounts.filter(\.enabled).count) service(s)."
+            } else {
+                submitError = "\(succeeded) submitted, \(failedMessages.count) failed.\n\(failedMessages.prefix(3).joined(separator: "\n"))"
+            }
         }
         isSubmitting = false
     }
