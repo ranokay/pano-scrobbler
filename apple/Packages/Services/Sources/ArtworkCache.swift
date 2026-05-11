@@ -30,11 +30,20 @@ public actor ArtworkCache {
         let timestamp: Date
     }
 
+    private struct CachedImageData {
+        let data: Data
+        let timestamp: Date
+    }
+
     private var cache: [Subject: CachedResult] = [:]
     private var pending: [Subject: Task<URL?, Never>] = [:]
+    private var imageDataCache: [URL: CachedImageData] = [:]
+    private var imageDataOrder: [URL] = []
+    private var imageDataPending: [URL: Task<Data?, Never>] = [:]
 
     /// Time after which a `nil` (miss) entry is re-checked.
     private let negativeCacheTTL: TimeInterval = 300
+    private let maxImageDataEntries = 300
 
     private let lookup: ArtworkLookupService
 
@@ -79,10 +88,64 @@ public actor ArtworkCache {
         return url
     }
 
+    /// Fetches and caches raw image bytes for an artwork URL. This avoids
+    /// `AsyncImage` re-downloading/re-decoding artwork every time SwiftUI
+    /// recreates rows during tab switches or list scrolling.
+    public func imageData(for url: URL) async -> Data? {
+        if let cached = imageDataCache[url] {
+            touchImageData(url)
+            return cached.data
+        }
+
+        if let inflight = imageDataPending[url] {
+            return await inflight.value
+        }
+
+        let task = Task<Data?, Never> {
+            do {
+                let (data, response) = try await URLSession.shared.data(from: url)
+                if let http = response as? HTTPURLResponse, !(200..<300).contains(http.statusCode) {
+                    return nil
+                }
+                return data
+            } catch {
+                return nil
+            }
+        }
+        imageDataPending[url] = task
+
+        guard let data = await task.value else {
+            imageDataPending[url] = nil
+            return nil
+        }
+
+        imageDataPending[url] = nil
+        imageDataCache[url] = CachedImageData(data: data, timestamp: Date())
+        touchImageData(url)
+        evictImageDataIfNeeded()
+        return data
+    }
+
     /// Clears all cached entries.
     public func clear() {
         cache.removeAll()
         pending.values.forEach { $0.cancel() }
         pending.removeAll()
+        imageDataCache.removeAll()
+        imageDataOrder.removeAll()
+        imageDataPending.values.forEach { $0.cancel() }
+        imageDataPending.removeAll()
+    }
+
+    private func touchImageData(_ url: URL) {
+        imageDataOrder.removeAll { $0 == url }
+        imageDataOrder.append(url)
+    }
+
+    private func evictImageDataIfNeeded() {
+        while imageDataOrder.count > maxImageDataEntries {
+            let url = imageDataOrder.removeFirst()
+            imageDataCache.removeValue(forKey: url)
+        }
     }
 }

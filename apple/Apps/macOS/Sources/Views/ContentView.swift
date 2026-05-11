@@ -131,12 +131,12 @@ struct ContentView: View {
     private var statusPill: some View {
         HStack(spacing: 6) {
             PulsingDot(
-                color: model.status.state.indicatorColor,
+                color: model.presentationStatus.state.indicatorColor,
                 size: 7,
-                isPulsing: model.status.state == .playing
+                isPulsing: model.presentationStatus.state == .playing
             )
 
-            Text(model.status.state.displayLabel)
+            Text(model.presentationStatus.state.displayLabel)
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .monospacedDigit()

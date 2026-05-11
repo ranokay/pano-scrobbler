@@ -10,7 +10,7 @@ struct ScrobbleHistoryView: View {
             if model.isLoadingHistory && model.scrobbleHistory.isEmpty {
                 ProgressView("Loading scrobbles…")
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-            } else if model.scrobbleHistory.isEmpty && currentlyPlayingEntries.isEmpty {
+            } else if model.scrobbleHistory.isEmpty {
                 ContentUnavailableView(
                     "No Scrobbles",
                     systemImage: "clock.arrow.circlepath",
@@ -25,20 +25,11 @@ struct ScrobbleHistoryView: View {
             ToolbarItem(placement: .primaryAction) {
                 Button {
                     model.loadHistory(page: 1)
-                    Task { await model.refreshRemoteNowPlaying() }
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .disabled(model.isLoadingHistory)
             }
-        }
-        .task {
-            // Refresh remote nowplaying when entering, so the top section is fresh.
-            model.startRemoteNowPlayingPolling()
-            await model.refreshRemoteNowPlaying()
-        }
-        .onDisappear {
-            model.stopRemoteNowPlayingPolling()
         }
         .onAppear {
             if model.scrobbleHistory.isEmpty {
@@ -57,49 +48,11 @@ struct ScrobbleHistoryView: View {
         return ""
     }
 
-    /// Combines the local-Mac now-playing track (if any) with remote entries,
-    /// represented as `LiveTrack` for unified rendering.
-    private var currentlyPlayingEntries: [LiveTrack] {
-        var live: [LiveTrack] = []
-
-        if let data = model.status.data, model.status.state == .playing {
-            live.append(LiveTrack(
-                id: "local|\(data.artist)|\(data.track)",
-                source: "This Mac" + (data.appName.map { " · \($0)" } ?? ""),
-                artist: data.artist,
-                track: data.track,
-                album: data.album,
-                artworkURL: data.artworkURL
-            ))
-        }
-
-        for entry in model.remoteNowPlaying {
-            live.append(LiveTrack(
-                id: entry.id,
-                source: "\(entry.sourceDisplayName) · \(entry.username)",
-                artist: entry.artist,
-                track: entry.track,
-                album: entry.album,
-                artworkURL: entry.artworkURL
-            ))
-        }
-
-        return live
-    }
-
     // MARK: - Track List
 
     private var trackList: some View {
         List {
-            if !currentlyPlayingEntries.isEmpty {
-                Section("Currently Playing") {
-                    ForEach(currentlyPlayingEntries) { entry in
-                        LiveTrackRow(entry: entry)
-                    }
-                }
-            }
-
-            Section(currentlyPlayingEntries.isEmpty ? "" : "Recent Scrobbles") {
+            Section {
                 ForEach(model.scrobbleHistory.filter { !$0.isNowPlaying }) { track in
                     TrackRow(track: track)
                         .contentShape(Rectangle())
@@ -131,7 +84,6 @@ struct ScrobbleHistoryView: View {
         }
         .listStyle(.inset)
         .scrollContentBackground(.hidden)
-        .animation(.default, value: currentlyPlayingEntries)
     }
 
     @ViewBuilder
@@ -188,56 +140,6 @@ struct ScrobbleHistoryView: View {
                 Label("Delete Scrobble", systemImage: "trash")
             }
         }
-    }
-}
-
-// MARK: - LiveTrack (unified local + remote)
-
-struct LiveTrack: Identifiable, Equatable {
-    var id: String
-    var source: String
-    var artist: String
-    var track: String
-    var album: String?
-    var artworkURL: URL?
-}
-
-private struct LiveTrackRow: View {
-    var entry: LiveTrack
-
-    var body: some View {
-        HStack(spacing: Layout.sectionSpacing) {
-            AsyncArtwork(
-                subject: .track(artist: entry.artist, title: entry.track),
-                hint: entry.artworkURL,
-                placeholderSymbol: "music.note"
-            )
-            .frame(width: 40, height: 40)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(entry.track)
-                    .font(.body)
-                    .lineLimit(1)
-                Text(entry.artist)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                Text(entry.source)
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
-                    .lineLimit(1)
-            }
-
-            Spacer()
-
-            HStack(spacing: 4) {
-                PulsingDot(color: .green, size: 6, isPulsing: true)
-                Text("Now")
-                    .font(.caption.weight(.medium))
-                    .foregroundStyle(.green)
-            }
-        }
-        .padding(.vertical, 2)
     }
 }
 

@@ -36,6 +36,11 @@ public struct LastFMImage: Codable, Sendable {
     public var size: String
     public var url: String
 
+    public init(size: String, url: String) {
+        self.size = size
+        self.url = url
+    }
+
     enum CodingKeys: String, CodingKey {
         case size
         case url = "#text"
@@ -187,6 +192,28 @@ public struct LastFMTrack: Codable, Identifiable, Sendable {
     enum CodingKeys: String, CodingKey {
         case name, artist, album, url, date, image, loved, playcount
         case attr = "@attr"
+    }
+
+    public init(
+        name: String,
+        artist: LastFMArtist,
+        album: LastFMAlbum? = nil,
+        url: String? = nil,
+        date: LastFMDate? = nil,
+        image: [LastFMImage]? = nil,
+        loved: StringOrBool? = nil,
+        playcount: StringOrInt? = nil,
+        attr: TrackAttr? = nil
+    ) {
+        self.name = name
+        self.artist = artist
+        self.album = album
+        self.url = url
+        self.date = date
+        self.image = image
+        self.loved = loved
+        self.playcount = playcount
+        self.attr = attr
     }
 }
 
@@ -602,4 +629,3 @@ public struct ArtistTopAlbumsContainer: Codable, Sendable {
 public struct LastFMTopTags: Codable, Sendable {
     public var tag: [LastFMTag]
 }
-

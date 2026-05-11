@@ -106,7 +106,7 @@ final class AppModel: ObservableObject {
             NSApp.terminate(nil)
         }
         statusItem.onLove = { [weak self] in
-            guard let self, let data = self.status.data else { return }
+            guard let self, let data = self.presentationStatus.data else { return }
             Task {
                 await self.toggleLove(artist: data.artist, track: data.track, loved: true)
             }
@@ -134,6 +134,7 @@ final class AppModel: ObservableObject {
             await reloadServices()
             startEngine()
             startStatusPolling()
+            startRemoteNowPlayingPolling()
             startPendingRetryLoop()
             appendLog("Loaded \(accounts.count) account(s).")
         } catch {
@@ -442,7 +443,7 @@ final class AppModel: ObservableObject {
                 await MainActor.run {
                     self.status = status
                     self.pendingCount = pending
-                    self.statusItem.update(status: status)
+                    self.statusItem.update(status: self.presentationStatus)
                     self.updateDiscordPresence(status: status)
                 }
                 try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -614,6 +615,31 @@ final class AppModel: ObservableObject {
 
     private var remoteNowPlayingPollTask: Task<Void, Never>?
 
+    /// User-facing now-playing state. Remote service state wins because
+    /// Last.fm/ListenBrainz represent the account's actual current listen,
+    /// while the local engine only knows this Mac.
+    var presentationStatus: NowPlayingStatus {
+        if let remote = remoteNowPlaying.first {
+            return NowPlayingStatus(
+                data: ScrobbleData(
+                    artist: remote.artist,
+                    track: remote.track,
+                    album: remote.album,
+                    timestamp: remote.since ?? Date(),
+                    appName: "\(remote.sourceDisplayName) · \(remote.username)",
+                    artworkURL: remote.artworkURL
+                ),
+                state: .playing
+            )
+        }
+
+        if status.state == .playing {
+            return status
+        }
+
+        return NowPlayingStatus()
+    }
+
     /// Starts polling for remote now-playing entries (every 30s).
     /// Safe to call multiple times — second call is a no-op.
     func startRemoteNowPlayingPolling() {
@@ -683,6 +709,7 @@ final class AppModel: ObservableObject {
         }
 
         remoteNowPlaying = entries
+        statusItem.update(status: presentationStatus)
     }
 
     func toggleLove(artist: String, track: String, loved: Bool) async {

@@ -1,3 +1,4 @@
+import AppKit
 import Core
 import Services
 import SwiftUI
@@ -161,33 +162,36 @@ struct AsyncArtwork: View {
 
     @Environment(\.artworkCache) private var cache
     @State private var resolved: URL?
-    @State private var didAttempt = false
+    @State private var image: NSImage?
 
     var body: some View {
         Group {
-            if let url = resolved {
-                AsyncImage(url: url) { phase in
-                    switch phase {
-                    case .success(let image):
-                        image.resizable().aspectRatio(contentMode: .fill)
-                    case .failure:
-                        placeholder
-                    case .empty:
-                        placeholder
-                    @unknown default:
-                        placeholder
-                    }
-                }
+            if let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
             } else {
                 placeholder
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
         .task(id: taskID) {
-            guard !didAttempt else { return }
-            didAttempt = true
+            await MainActor.run {
+                self.resolved = nil
+                self.image = nil
+            }
             let url = await cache.resolve(subject, hint: hint)
-            await MainActor.run { self.resolved = url }
+            guard let url, let data = await cache.imageData(for: url), let image = NSImage(data: data) else {
+                await MainActor.run {
+                    self.resolved = url
+                    self.image = nil
+                }
+                return
+            }
+            await MainActor.run {
+                self.resolved = url
+                self.image = image
+            }
         }
     }
 
