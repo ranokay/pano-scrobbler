@@ -1,17 +1,40 @@
-import SwiftUI
 import Core
+import SwiftUI
 
 struct ScrobbleHistoryView: View {
     @ObservedObject var model: AppModel
     @State private var selectedTrack: LastFMTrack?
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                header
+        Group {
+            if model.isLoadingHistory && model.scrobbleHistory.isEmpty {
+                ProgressView("Loading scrobbles…")
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+            } else if model.scrobbleHistory.isEmpty && currentlyPlayingEntries.isEmpty {
+                ContentUnavailableView(
+                    "No Scrobbles",
+                    systemImage: "clock.arrow.circlepath",
+                    description: Text("Add a Last.fm account and start listening to music.")
+                )
+            } else {
                 trackList
             }
-            .padding(Spacing.lg)
+        }
+        .navigationSubtitle(subtitle)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    model.loadHistory(page: 1)
+                    Task { await model.refreshRemoteNowPlaying() }
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .disabled(model.isLoadingHistory)
+            }
+        }
+        .task {
+            // Refresh remote nowplaying when entering, so the top section is fresh.
+            await model.refreshRemoteNowPlaying()
         }
         .onAppear {
             if model.scrobbleHistory.isEmpty {
@@ -23,132 +46,200 @@ struct ScrobbleHistoryView: View {
         }
     }
 
-    // MARK: - Header
-
-    private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Scrobble History")
-                    .font(.displayLarge)
-
-                if model.historyPage.total > 0 {
-                    Text("\(model.historyPage.total) total scrobbles")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-            }
-
-            Spacer()
-
-            Button {
-                model.loadHistory(page: 1)
-            } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
-            }
-            .disabled(model.isLoadingHistory)
+    private var subtitle: String {
+        if model.historyPage.total > 0 {
+            return "\(model.historyPage.total.formatted()) scrobbles"
         }
+        return ""
+    }
+
+    /// Combines the local-Mac now-playing track (if any) with remote entries,
+    /// represented as `LiveTrack` for unified rendering.
+    private var currentlyPlayingEntries: [LiveTrack] {
+        var live: [LiveTrack] = []
+
+        if let data = model.status.data, model.status.state == .playing {
+            live.append(LiveTrack(
+                id: "local|\(data.artist)|\(data.track)",
+                source: "This Mac" + (data.appName.map { " · \($0)" } ?? ""),
+                artist: data.artist,
+                track: data.track,
+                album: data.album,
+                artworkURL: data.artworkURL
+            ))
+        }
+
+        for entry in model.remoteNowPlaying {
+            // Skip duplicates if Mac is also playing the same thing.
+            if let local = model.status.data,
+               model.status.state == .playing,
+               entry.matchesLocal(local) {
+                continue
+            }
+            live.append(LiveTrack(
+                id: entry.id,
+                source: "\(entry.sourceDisplayName) · \(entry.username)",
+                artist: entry.artist,
+                track: entry.track,
+                album: entry.album,
+                artworkURL: entry.artworkURL
+            ))
+        }
+
+        return live
     }
 
     // MARK: - Track List
 
-    @ViewBuilder
     private var trackList: some View {
-        if model.isLoadingHistory && model.scrobbleHistory.isEmpty {
-            ProgressView("Loading scrobbles…")
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, Spacing.xl)
-        } else if model.scrobbleHistory.isEmpty {
-            ContentUnavailableView(
-                "No Scrobbles",
-                systemImage: "clock.arrow.circlepath",
-                description: Text("Add a Last.fm account and start listening to music.")
-            )
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, Spacing.xl)
-        } else {
-            LazyVStack(spacing: Spacing.sm) {
-                ForEach(model.scrobbleHistory) { track in
+        List {
+            if !currentlyPlayingEntries.isEmpty {
+                Section("Currently Playing") {
+                    ForEach(currentlyPlayingEntries) { entry in
+                        LiveTrackRow(entry: entry)
+                    }
+                }
+            }
+
+            Section(currentlyPlayingEntries.isEmpty ? "" : "Recent Scrobbles") {
+                ForEach(model.scrobbleHistory.filter { !$0.isNowPlaying }) { track in
                     TrackRow(track: track)
                         .contentShape(Rectangle())
                         .onTapGesture { selectedTrack = track }
                         .contextMenu {
-                            Button {
-                                selectedTrack = track
-                            } label: {
-                                Label("Info", systemImage: "info.circle")
-                            }
-
-                            if let url = track.url.flatMap({ URL(string: $0) }) {
-                                Button {
-                                    NSWorkspace.shared.open(url)
-                                } label: {
-                                    Label("Open in Browser", systemImage: "safari")
-                                }
-                            }
-
-                            Button {
-                                let text = "\(track.artist.name) — \(track.name)"
-                                NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(text, forType: .string)
-                            } label: {
-                                Label("Copy", systemImage: "doc.on.doc")
-                            }
-
-                            Button {
-                                Task {
-                                    let isLoved = track.loved?.boolValue == true
-                                    await model.toggleLove(
-                                        artist: track.artist.name,
-                                        track: track.name,
-                                        loved: !isLoved
-                                    )
-                                }
-                            } label: {
-                                Label(
-                                    track.loved?.boolValue == true ? "Unlove" : "Love",
-                                    systemImage: track.loved?.boolValue == true ? "heart.slash" : "heart"
-                                )
-                            }
-
-                            Divider()
-
-                            if let timestamp = track.timestamp, !track.isNowPlaying {
-                                Button(role: .destructive) {
-                                    Task {
-                                        await model.deleteScrobble(
-                                            artist: track.artist.name,
-                                            track: track.name,
-                                            timestamp: timestamp
-                                        )
-                                    }
-                                } label: {
-                                    Label("Delete Scrobble", systemImage: "trash")
-                                }
-                            }
+                            trackMenu(for: track)
                         }
                 }
 
                 if model.historyPage.page < model.historyPage.totalPages {
-                    loadMoreButton
+                    HStack {
+                        Spacer()
+                        Button {
+                            model.loadHistory(page: model.historyPage.page + 1)
+                        } label: {
+                            if model.isLoadingHistory {
+                                ProgressView().controlSize(.small)
+                            } else {
+                                Text("Load More")
+                            }
+                        }
+                        .disabled(model.isLoadingHistory)
+                        Spacer()
+                    }
+                    .listRowSeparator(.hidden)
+                    .padding(.vertical, 4)
                 }
             }
         }
+        .listStyle(.inset)
+        .scrollContentBackground(.hidden)
+        .animation(.default, value: currentlyPlayingEntries)
     }
 
-    private var loadMoreButton: some View {
+    @ViewBuilder
+    private func trackMenu(for track: LastFMTrack) -> some View {
         Button {
-            model.loadHistory(page: model.historyPage.page + 1)
+            selectedTrack = track
         } label: {
-            if model.isLoadingHistory {
-                ProgressView()
-                    .controlSize(.small)
-            } else {
-                Text("Load More")
+            Label("Info", systemImage: "info.circle")
+        }
+
+        if let url = track.url.flatMap({ URL(string: $0) }) {
+            Button {
+                NSWorkspace.shared.open(url)
+            } label: {
+                Label("Open in Browser", systemImage: "safari")
             }
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, Spacing.md)
-        .disabled(model.isLoadingHistory)
+
+        Button {
+            let text = "\(track.artist.name) — \(track.name)"
+            NSPasteboard.general.clearContents()
+            NSPasteboard.general.setString(text, forType: .string)
+        } label: {
+            Label("Copy", systemImage: "doc.on.doc")
+        }
+
+        Button {
+            Task {
+                let isLoved = track.loved?.boolValue == true
+                await model.toggleLove(
+                    artist: track.artist.name,
+                    track: track.name,
+                    loved: !isLoved
+                )
+            }
+        } label: {
+            Label(
+                track.loved?.boolValue == true ? "Unlove" : "Love",
+                systemImage: track.loved?.boolValue == true ? "heart.slash" : "heart"
+            )
+        }
+
+        if let timestamp = track.timestamp {
+            Divider()
+            Button(role: .destructive) {
+                Task {
+                    await model.deleteScrobble(
+                        artist: track.artist.name,
+                        track: track.name,
+                        timestamp: timestamp
+                    )
+                }
+            } label: {
+                Label("Delete Scrobble", systemImage: "trash")
+            }
+        }
+    }
+}
+
+// MARK: - LiveTrack (unified local + remote)
+
+struct LiveTrack: Identifiable, Equatable {
+    var id: String
+    var source: String
+    var artist: String
+    var track: String
+    var album: String?
+    var artworkURL: URL?
+}
+
+private struct LiveTrackRow: View {
+    var entry: LiveTrack
+
+    var body: some View {
+        HStack(spacing: Layout.sectionSpacing) {
+            AsyncArtwork(
+                subject: .track(artist: entry.artist, title: entry.track),
+                hint: entry.artworkURL,
+                placeholderSymbol: "music.note"
+            )
+            .frame(width: 40, height: 40)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(entry.track)
+                    .font(.body)
+                    .lineLimit(1)
+                Text(entry.artist)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Text(entry.source)
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            HStack(spacing: 4) {
+                PulsingDot(color: .green, size: 6, isPulsing: true)
+                Text("Now")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.green)
+            }
+        }
+        .padding(.vertical, 2)
     }
 }
 
@@ -158,81 +249,56 @@ struct TrackRow: View {
     var track: LastFMTrack
 
     var body: some View {
-        GlassCard(spacing: Spacing.sm) {
-            HStack(spacing: Spacing.md) {
-                artworkView
-                    .frame(width: 40, height: 40)
+        HStack(spacing: Layout.sectionSpacing) {
+            AsyncArtwork(
+                subject: .track(artist: track.artist.name, title: track.name),
+                hint: track.imageURL,
+                placeholderSymbol: "music.note"
+            )
+            .frame(width: 40, height: 40)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(track.name)
-                        .font(.system(size: 13, weight: .medium))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(track.name)
+                    .font(.body)
+                    .lineLimit(1)
+
+                Text(track.artist.name)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+
+                if let albumName = track.album?.name, !albumName.isEmpty {
+                    Text(albumName)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
                         .lineLimit(1)
+                }
+            }
 
-                    Text(track.artist.name)
-                        .font(.system(size: 12))
+            Spacer()
+
+            VStack(alignment: .trailing, spacing: 2) {
+                if track.isNowPlaying {
+                    HStack(spacing: 4) {
+                        PulsingDot(color: .green, size: 6, isPulsing: true)
+                        Text("Now")
+                            .font(.caption)
+                            .foregroundStyle(.green)
+                    }
+                } else if let date = track.timestamp {
+                    Text(date, style: .relative)
+                        .font(.caption)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
-
-                    if let albumName = track.album?.name, !albumName.isEmpty {
-                        Text(albumName)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.tertiary)
-                            .lineLimit(1)
-                    }
+                        .monospacedDigit()
                 }
 
-                Spacer()
-
-                VStack(alignment: .trailing, spacing: 2) {
-                    if track.isNowPlaying {
-                        HStack(spacing: 4) {
-                            PulsingDot(color: AccentColors.success, size: 6, isPulsing: true)
-                            Text("Now")
-                                .font(.system(size: 11, weight: .medium))
-                                .foregroundStyle(AccentColors.success)
-                        }
-                    } else if let date = track.timestamp {
-                        Text(date, style: .relative)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    if track.loved?.boolValue == true {
-                        Image(systemName: "heart.fill")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.red)
-                    }
+                if track.loved?.boolValue == true {
+                    Image(systemName: "heart.fill")
+                        .font(.caption2)
+                        .foregroundStyle(.red)
                 }
             }
         }
-    }
-
-    @ViewBuilder
-    private var artworkView: some View {
-        if let url = track.imageURL {
-            AsyncImage(url: url) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                default:
-                    artworkPlaceholder
-                }
-            }
-            .clipShape(RoundedRectangle(cornerRadius: 6, style: .continuous))
-        } else {
-            artworkPlaceholder
-        }
-    }
-
-    private var artworkPlaceholder: some View {
-        RoundedRectangle(cornerRadius: 6, style: .continuous)
-            .fill(.quaternary)
-            .overlay {
-                Image(systemName: "music.note")
-                    .font(.system(size: 16))
-                    .foregroundStyle(.tertiary)
-            }
+        .padding(.vertical, 2)
     }
 }

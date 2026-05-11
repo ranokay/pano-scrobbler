@@ -1,5 +1,5 @@
-import SwiftUI
 import Core
+import SwiftUI
 import UniformTypeIdentifiers
 
 /// Import scrobbles from CSV or JSON files and submit to all active services.
@@ -13,15 +13,42 @@ struct FileScrobbleView: View {
     @State private var showFilePicker = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                header
-                importSection
-                if !importedScrobbles.isEmpty { previewSection }
-                if let error = parseError { errorSection(error) }
-                if let result = submitResult { resultSection(result) }
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
+                    formatHelp
+
+                    if !importedScrobbles.isEmpty {
+                        previewSection
+                    }
+
+                    if let error = parseError {
+                        errorBanner(error)
+                    }
+
+                    if let result = submitResult {
+                        successBanner(result)
+                    }
+                }
+                .padding(Layout.windowPadding)
+                .frame(maxWidth: 900, alignment: .leading)
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(Spacing.lg)
+
+            if !importedScrobbles.isEmpty {
+                Divider()
+                actionFooter
+            }
+        }
+        .navigationSubtitle(subtitle)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    showFilePicker = true
+                } label: {
+                    Label("Choose File…", systemImage: "doc.badge.plus")
+                }
+            }
         }
         .fileImporter(
             isPresented: $showFilePicker,
@@ -32,171 +59,138 @@ struct FileScrobbleView: View {
         }
     }
 
-    // MARK: - Header
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            Text("Scrobble from File")
-                .font(.displayLarge)
-            Text("Import scrobbles from a CSV or JSON file and submit them to all active services.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
+    private var subtitle: String {
+        importedScrobbles.isEmpty ? "" : "\(importedScrobbles.count) loaded"
     }
 
-    // MARK: - Import
+    // MARK: - Format Help
 
-    private var importSection: some View {
-        GlassCard(spacing: Spacing.md) {
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                Text("Supported Formats")
-                    .font(.system(size: 13, weight: .semibold))
-
-                HStack(spacing: Spacing.lg) {
-                    formatInfo("CSV", icon: "tablecells", description: "artist, track, album, timestamp")
-                    formatInfo("JSON", icon: "curlybraces", description: "[{artist, track, album, timestamp}]")
-                }
-
+    private var formatHelp: some View {
+        GroupBox("Supported Formats") {
+            VStack(alignment: .leading, spacing: Layout.inlineSpacing) {
+                formatRow("CSV", icon: "tablecells", description: "artist, track, album, timestamp")
                 Divider()
-
-                HStack(spacing: Spacing.md) {
-                    Button {
-                        showFilePicker = true
-                    } label: {
-                        Label("Choose File…", systemImage: "doc.badge.plus")
-                    }
-                    .buttonStyle(.borderedProminent)
-
-                    if !importedScrobbles.isEmpty {
-                        Text("\(importedScrobbles.count) scrobble(s) loaded")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.secondary)
-                    }
-
-                    Spacer()
-                }
+                formatRow("JSON", icon: "curlybraces", description: "[{ artist, track, album, timestamp }]")
             }
+            .padding(.vertical, 4)
         }
     }
 
-    private func formatInfo(_ title: String, icon: String, description: String) -> some View {
-        HStack(spacing: Spacing.sm) {
-            Image(systemName: icon)
-                .font(.system(size: 16))
-                .foregroundStyle(.secondary)
-                .frame(width: 24)
+    private func formatRow(_ title: String, icon: String, description: String) -> some View {
+        Label {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 12, weight: .semibold))
+                Text(title).font(.callout.weight(.semibold))
                 Text(description)
-                    .font(.system(size: 10, design: .monospaced))
+                    .font(.caption.monospaced())
                     .foregroundStyle(.tertiary)
             }
+        } icon: {
+            Image(systemName: icon)
+                .foregroundStyle(.secondary)
+                .frame(width: 22)
         }
+        .padding(.vertical, 4)
     }
 
     // MARK: - Preview
 
     private var previewSection: some View {
-        VStack(alignment: .leading, spacing: Spacing.sm) {
-            HStack {
-                Text("Preview (\(importedScrobbles.count) entries)")
-                    .font(.system(size: 13, weight: .semibold))
-
-                Spacer()
-
-                Button {
-                    Task { await submitAll() }
-                } label: {
-                    Label(isSubmitting ? "Submitting…" : "Submit All", systemImage: "paperplane.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(isSubmitting)
-
-                Button {
-                    importedScrobbles = []
-                    parseError = nil
-                    submitResult = nil
-                } label: {
-                    Label("Clear", systemImage: "xmark")
-                }
-                .buttonStyle(.bordered)
-            }
-
-            GlassCard(spacing: 0) {
-                VStack(spacing: 0) {
-                    ForEach(Array(importedScrobbles.prefix(50).enumerated()), id: \.offset) { index, data in
-                        HStack(spacing: Spacing.md) {
-                            Text("\(index + 1)")
-                                .font(.system(size: 10, design: .monospaced))
-                                .foregroundStyle(.tertiary)
-                                .frame(width: 28, alignment: .trailing)
-
-                            VStack(alignment: .leading, spacing: 1) {
-                                Text(data.track)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .lineLimit(1)
-                                Text(data.artist)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
-
-                            Spacer()
-
-                            if let album = data.album, !album.isEmpty {
-                                Text(album)
-                                    .font(.system(size: 11))
-                                    .foregroundStyle(.tertiary)
-                                    .lineLimit(1)
-                                    .frame(maxWidth: 200, alignment: .trailing)
-                            }
-
-                            Text(data.timestamp, style: .relative)
-                                .font(.system(size: 10))
-                                .foregroundStyle(.tertiary)
-                                .frame(width: 80, alignment: .trailing)
-                        }
-                        .padding(.vertical, 4)
-                        .padding(.horizontal, Spacing.sm)
-
-                        if index < min(importedScrobbles.count, 50) - 1 {
-                            Divider()
-                        }
-                    }
-
-                    if importedScrobbles.count > 50 {
-                        Text("… and \(importedScrobbles.count - 50) more")
-                            .font(.system(size: 11))
+        GroupBox("Preview") {
+            VStack(spacing: 0) {
+                ForEach(Array(importedScrobbles.prefix(50).enumerated()), id: \.offset) { index, data in
+                    HStack(spacing: Layout.sectionSpacing) {
+                        Text("\(index + 1)")
+                            .font(.caption.monospaced())
                             .foregroundStyle(.tertiary)
-                            .padding(Spacing.sm)
+                            .frame(width: 28, alignment: .trailing)
+
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(data.track)
+                                .font(.callout)
+                                .lineLimit(1)
+                            Text(data.artist)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                        }
+
+                        Spacer()
+
+                        if let album = data.album, !album.isEmpty {
+                            Text(album)
+                                .font(.caption)
+                                .foregroundStyle(.tertiary)
+                                .lineLimit(1)
+                                .frame(maxWidth: 200, alignment: .trailing)
+                        }
+
+                        Text(data.timestamp, style: .relative)
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                            .frame(width: 80, alignment: .trailing)
                     }
+                    .padding(.vertical, 4)
+
+                    if index < min(importedScrobbles.count, 50) - 1 {
+                        Divider()
+                    }
+                }
+
+                if importedScrobbles.count > 50 {
+                    Divider()
+                    Text("… and \(importedScrobbles.count - 50) more")
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, Layout.inlineSpacing)
                 }
             }
         }
     }
 
-    // MARK: - Status Sections
+    // MARK: - Banners
 
-    private func errorSection(_ message: String) -> some View {
-        HStack(spacing: Spacing.sm) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .foregroundStyle(AccentColors.error)
-            Text(message)
-                .font(.system(size: 12))
-                .foregroundStyle(AccentColors.error)
-        }
+    private func errorBanner(_ message: String) -> some View {
+        Label(message, systemImage: "exclamationmark.triangle.fill")
+            .foregroundStyle(.red)
+            .font(.callout)
     }
 
-    private func resultSection(_ message: String) -> some View {
-        HStack(spacing: Spacing.sm) {
-            Image(systemName: "checkmark.circle.fill")
-                .foregroundStyle(AccentColors.success)
-            Text(message)
-                .font(.system(size: 12, weight: .medium))
-                .foregroundStyle(AccentColors.success)
+    private func successBanner(_ message: String) -> some View {
+        Label(message, systemImage: "checkmark.circle.fill")
+            .foregroundStyle(.green)
+            .font(.callout)
+            .transition(.scale.combined(with: .opacity))
+    }
+
+    // MARK: - Action Footer
+
+    private var actionFooter: some View {
+        HStack(spacing: Layout.inlineSpacing) {
+            Button {
+                importedScrobbles = []
+                parseError = nil
+                submitResult = nil
+            } label: {
+                Label("Clear", systemImage: "xmark")
+            }
+
+            Spacer()
+
+            Button {
+                Task { await submitAll() }
+            } label: {
+                if isSubmitting {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Label("Submit All", systemImage: "paperplane.fill")
+                }
+            }
+            .prominentGlassButton()
+            .disabled(isSubmitting)
+            .keyboardShortcut(.defaultAction)
         }
-        .transition(.scale.combined(with: .opacity))
+        .padding(Layout.windowPadding)
     }
 
     // MARK: - File Handling
@@ -233,10 +227,10 @@ struct FileScrobbleView: View {
     }
 
     private func parseCSV(_ content: String) throws -> [ScrobbleData] {
-        let lines = content.components(separatedBy: .newlines).filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        let lines = content.components(separatedBy: .newlines)
+            .filter { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
         guard lines.count > 1 else { throw FileParseError.empty }
 
-        // Skip header row
         return lines.dropFirst().compactMap { line in
             let fields = parseCSVLine(line)
             guard fields.count >= 2 else { return nil }
@@ -309,7 +303,7 @@ struct FileScrobbleView: View {
         }
 
         withAnimation(.spring(duration: 0.3)) {
-            submitResult = "Successfully submitted \(succeeded) scrobble(s) to \(model.accounts.filter(\.enabled).count) service(s)."
+            submitResult = "Submitted \(succeeded) scrobble(s) to \(model.accounts.filter(\.enabled).count) service(s)."
         }
         isSubmitting = false
     }

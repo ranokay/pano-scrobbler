@@ -1,26 +1,59 @@
-[tasks.build]
-description = "Build and stage the Pano Scrobbler macOS app bundle"
-run = "scripts/build_app.sh"
-
-[tasks.dmg]
-description = "Build, sign, and package the Pano Scrobbler macOS DMG"
-run = "scripts/build_dmg.sh"
-
-[tasks.launch]
-description = "Build and launch the Pano Scrobbler macOS app"
-depends = ["build"]
-run = "open -n '../dist/Pano Scrobbler.app'"
-
 [tasks.test]
 description = "Run the Pano Scrobbler unit tests"
 run = "swift test"
 
-[tasks.verify-release]
-description = "Run the local production-readiness gates that do not require notarization credentials"
+[tasks."build:dev"]
+description = "Build the debug dev app bundle with isolated bundle ID, data, and Keychain state"
+run = "APP_VARIANT=dev CONFIGURATION=debug ARCHS=\"$(uname -m)\" scripts/build_app.sh"
+
+[tasks."run:dev"]
+description = "Build and launch the isolated dev app"
+depends = ["build:dev"]
+run = "open -n '../dist/Pano Scrobbler Dev.app'"
+
+[tasks."build:prod"]
+description = "Build the production app bundle for the host architecture"
+run = "APP_VARIANT=prod CONFIGURATION=release ARCHS=\"$(uname -m)\" scripts/build_app.sh"
+
+[tasks."run:prod"]
+description = "Build and launch the production app bundle"
+depends = ["build:prod"]
+run = "open -n '../dist/Pano Scrobbler.app'"
+
+[tasks."dmg:arm64"]
+description = "Build the Apple Silicon macOS DMG"
+run = "APP_VARIANT=prod ARCHS=arm64 scripts/build_dmg.sh"
+
+[tasks."dmg:x64"]
+description = "Build the Intel macOS DMG"
+run = "APP_VARIANT=prod ARCHS=x86_64 scripts/build_dmg.sh"
+
+[tasks."dmg:universal"]
+description = "Build an optional universal macOS DMG"
+run = "APP_VARIANT=prod ARCHS=\"arm64 x86_64\" scripts/build_dmg.sh"
+
+[tasks."verify:release"]
+description = "Run local release gates for the split macOS DMGs"
 run = """
 swift test
-scripts/build_dmg.sh
+APP_VARIANT=prod ARCHS=arm64 scripts/build_dmg.sh
 codesign --verify --deep --strict --verbose=4 '../dist/Pano Scrobbler.app'
-lipo -info '../dist/Pano Scrobbler.app/Contents/MacOS/PanoScrobbler'
-hdiutil verify '../dist/pano-scrobbler-macos-universal.dmg'
+lipo '../dist/Pano Scrobbler.app/Contents/MacOS/PanoScrobbler' -verify_arch arm64
+hdiutil verify '../dist/pano-scrobbler-macos-arm64.dmg'
+APP_VARIANT=prod ARCHS=x86_64 scripts/build_dmg.sh
+codesign --verify --deep --strict --verbose=4 '../dist/Pano Scrobbler.app'
+lipo '../dist/Pano Scrobbler.app/Contents/MacOS/PanoScrobbler' -verify_arch x86_64
+hdiutil verify '../dist/pano-scrobbler-macos-x64.dmg'
 """
+
+[tasks.build]
+description = "Alias for build:prod"
+depends = ["build:prod"]
+
+[tasks.launch]
+description = "Alias for run:prod"
+depends = ["run:prod"]
+
+[tasks.dmg]
+description = "Alias for dmg:universal"
+depends = ["dmg:universal"]

@@ -108,3 +108,15 @@ public struct LBValidateTokenResponse: Codable, Sendable {
     public let valid: Bool
     public let user_name: String?
 }
+
+/// Top-level wrapper for /1/user/{username}/playing-now
+public struct LBPlayingNowResponse: Codable, Sendable {
+    public let payload: LBPlayingNowPayload
+}
+
+public struct LBPlayingNowPayload: Codable, Sendable {
+    public let count: Int
+    public let user_id: String?
+    public let listens: [LBListen]
+    public let playing_now: Bool?
+}

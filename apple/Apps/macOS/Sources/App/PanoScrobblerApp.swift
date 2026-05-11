@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 @main
@@ -7,19 +8,30 @@ struct PanoScrobblerApp: App {
     @AppStorage("hasCompletedOnboarding") private var hasCompletedOnboarding = false
 
     var body: some Scene {
-        WindowGroup("Pano Scrobbler") {
+        WindowGroup(AppConfiguration.displayName) {
             Group {
                 if hasCompletedOnboarding {
                     ContentView(model: model)
-                        .frame(minWidth: 1150, minHeight: 600)
+                        .frame(minWidth: 900, minHeight: 560)
                 } else {
                     OnboardingView(model: model, hasCompletedOnboarding: $hasCompletedOnboarding)
                 }
             }
             .background(WindowStateTracker())
         }
-        .defaultSize(width: 1200, height: 700)
+        .defaultSize(width: 1100, height: 680)
         .commands {
+            // Replace default Settings menu item so cmd+, opens our in-app Settings tab.
+            CommandGroup(replacing: .appSettings) {
+                Button("Settings…") {
+                    model.selectedSection = .settings
+                    for window in NSApp.windows where window.canBecomeKey {
+                        window.makeKeyAndOrderFront(nil)
+                    }
+                }
+                .keyboardShortcut(",", modifiers: .command)
+            }
+
             // App commands
             CommandGroup(after: .appInfo) {
                 Button("Refresh Accounts") {
@@ -106,7 +118,7 @@ private struct WindowStateTracker: NSViewRepresentable {
     func makeNSView(context: Context) -> NSView {
         let view = NSView()
         DispatchQueue.main.async {
-            view.window?.setFrameAutosaveName("PanoScrobblerMainWindow")
+            view.window?.setFrameAutosaveName(AppConfiguration.windowAutosaveName)
         }
         return view
     }

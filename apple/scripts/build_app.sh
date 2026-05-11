@@ -1,25 +1,59 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DISPLAY_NAME="Pano Scrobbler"
-APP_EXECUTABLE="PanoScrobbler"
-BUNDLE_ID="com.arn.scrobble.mac"
+BUILD_PRODUCT_NAME="PanoScrobbler"
 MIN_SYSTEM_VERSION="15.0"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT_DIR="$(cd "$SCRIPT_DIR/../.." && pwd)"
 APPLE_DIR="$ROOT_DIR/apple"
 DIST_DIR="$ROOT_DIR/dist"
+ICON_FILE="$APPLE_DIR/Apps/macOS/Resources/AppIcon.icns"
+# Optional: macOS 26 Liquid Glass icon bundle exported from Icon Composer.
+# Ships alongside .icns so older macOS versions still get a valid fallback.
+ICON_BUNDLE="$APPLE_DIR/Apps/macOS/Resources/AppIcon.icon"
+ENTITLEMENTS_FILE="$APPLE_DIR/Apps/macOS/PanoScrobbler.entitlements"
+CONFIGURATION="${CONFIGURATION:-release}"
+ARCHS="${ARCHS:-arm64 x86_64}"
+CODESIGN_IDENTITY="${MACOS_CODESIGN_IDENTITY:-${CODESIGN_IDENTITY:-}}"
+
+APP_VARIANT="${APP_VARIANT:-prod}"
+case "$APP_VARIANT" in
+  prod|production)
+    APP_VARIANT="prod"
+    DEFAULT_APP_DISPLAY_NAME="Pano Scrobbler"
+    DEFAULT_APP_EXECUTABLE="PanoScrobbler"
+    DEFAULT_BUNDLE_ID="com.arn.scrobble.mac"
+    DEFAULT_APP_DATA_DIRECTORY_NAME="Pano Scrobbler"
+    DEFAULT_KEYCHAIN_SERVICE="com.arn.scrobble.mac.credentials"
+    DEFAULT_WINDOW_AUTOSAVE_NAME="PanoScrobblerMainWindow"
+    ;;
+  dev|development)
+    APP_VARIANT="dev"
+    DEFAULT_APP_DISPLAY_NAME="Pano Scrobbler Dev"
+    DEFAULT_APP_EXECUTABLE="PanoScrobblerDev"
+    DEFAULT_BUNDLE_ID="com.arn.scrobble.mac.dev"
+    DEFAULT_APP_DATA_DIRECTORY_NAME="Pano Scrobbler Dev"
+    DEFAULT_KEYCHAIN_SERVICE="com.arn.scrobble.mac.dev.credentials"
+    DEFAULT_WINDOW_AUTOSAVE_NAME="PanoScrobblerDevMainWindow"
+    ;;
+  *)
+    echo "APP_VARIANT must be 'prod' or 'dev'." >&2
+    exit 1
+    ;;
+esac
+
+APP_DISPLAY_NAME="${APP_DISPLAY_NAME:-$DEFAULT_APP_DISPLAY_NAME}"
+APP_EXECUTABLE="${APP_EXECUTABLE:-$DEFAULT_APP_EXECUTABLE}"
+BUNDLE_ID="${BUNDLE_ID:-$DEFAULT_BUNDLE_ID}"
+APP_DATA_DIRECTORY_NAME="${APP_DATA_DIRECTORY_NAME:-$DEFAULT_APP_DATA_DIRECTORY_NAME}"
+KEYCHAIN_SERVICE="${KEYCHAIN_SERVICE:-$DEFAULT_KEYCHAIN_SERVICE}"
+WINDOW_AUTOSAVE_NAME="${WINDOW_AUTOSAVE_NAME:-$DEFAULT_WINDOW_AUTOSAVE_NAME}"
 APP_BUNDLE="${APP_BUNDLE:-$DIST_DIR/$APP_DISPLAY_NAME.app}"
 APP_CONTENTS="$APP_BUNDLE/Contents"
 APP_MACOS="$APP_CONTENTS/MacOS"
 APP_RESOURCES="$APP_CONTENTS/Resources"
 INFO_PLIST="$APP_CONTENTS/Info.plist"
-ICON_FILE="$APPLE_DIR/Apps/macOS/Resources/AppIcon.icns"
-ENTITLEMENTS_FILE="$APPLE_DIR/Apps/macOS/PanoScrobbler.entitlements"
-CONFIGURATION="${CONFIGURATION:-release}"
-ARCHS="${ARCHS:-arm64 x86_64}"
-CODESIGN_IDENTITY="${MACOS_CODESIGN_IDENTITY:-${CODESIGN_IDENTITY:-}}"
 
 VERSION_CODE="${VERSION_CODE:-$(tr -cd '0-9' < "$ROOT_DIR/version.txt")}"
 if [[ -z "$VERSION_CODE" ]]; then
@@ -47,7 +81,7 @@ binaries=()
 for arch in "${ARCH_ARRAY[@]}"; do
   swift build --package-path "$APPLE_DIR" --configuration "$CONFIGURATION" --arch "$arch"
   build_dir="$(swift build --package-path "$APPLE_DIR" --configuration "$CONFIGURATION" --arch "$arch" --show-bin-path)"
-  binary="$build_dir/$APP_EXECUTABLE"
+  binary="$build_dir/$BUILD_PRODUCT_NAME"
 
   if [[ ! -x "$binary" ]]; then
     echo "Missing built executable for $arch: $binary" >&2
@@ -69,6 +103,13 @@ chmod +x "$APP_MACOS/$APP_EXECUTABLE"
 
 cp "$ICON_FILE" "$APP_RESOURCES/AppIcon.icns"
 
+# Copy the macOS 26 Liquid Glass icon bundle if it exists. This makes the
+# icon render full-bleed in the new icon system; without it, macOS 26 wraps
+# legacy .icns icons in a default tile with gray padding.
+if [[ -d "$ICON_BUNDLE" ]]; then
+  cp -R "$ICON_BUNDLE" "$APP_RESOURCES/AppIcon.icon"
+fi
+
 cat > "$INFO_PLIST" <<PLIST
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -81,6 +122,8 @@ cat > "$INFO_PLIST" <<PLIST
   <key>CFBundleExecutable</key>
   <string>$APP_EXECUTABLE</string>
   <key>CFBundleIconFile</key>
+  <string>AppIcon</string>
+  <key>CFBundleIconName</key>
   <string>AppIcon</string>
   <key>CFBundleIdentifier</key>
   <string>$BUNDLE_ID</string>
@@ -104,6 +147,14 @@ cat > "$INFO_PLIST" <<PLIST
   <string>NSApplication</string>
   <key>NSUserNotificationsUsageDescription</key>
   <string>Pano Scrobbler shows now-playing and scrobble status notifications.</string>
+  <key>PanoAppDataDirectoryName</key>
+  <string>$APP_DATA_DIRECTORY_NAME</string>
+  <key>PanoBuildVariant</key>
+  <string>$APP_VARIANT</string>
+  <key>PanoKeychainService</key>
+  <string>$KEYCHAIN_SERVICE</string>
+  <key>PanoWindowAutosaveName</key>
+  <string>$WINDOW_AUTOSAVE_NAME</string>
 </dict>
 </plist>
 PLIST

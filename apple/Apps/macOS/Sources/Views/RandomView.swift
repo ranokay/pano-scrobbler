@@ -1,8 +1,9 @@
-import SwiftUI
+import AppKit
 import Core
 import Services
+import SwiftUI
 
-/// Picks a random entry from the user's library — analogous to Kotlin RandomScreen.
+/// Picks a random entry from the user's library.
 struct RandomView: View {
     @ObservedObject var model: AppModel
     @State private var selectedType: RandomType = .tracks
@@ -41,60 +42,53 @@ struct RandomView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                header
-                controls
+            VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
+                controlsCard
                 resultView
             }
-            .padding(Spacing.lg)
+            .padding(Layout.windowPadding)
+            .frame(maxWidth: 900, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .sheet(item: $selectedTrack) { track in
             MusicEntryInfoView(model: model, track: track, album: nil, artist: nil)
         }
     }
 
-    // MARK: - Header
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            Text("Random")
-                .font(.displayLarge)
-            Text("Discover a random entry from your library.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-    }
-
     // MARK: - Controls
 
-    private var controls: some View {
-        HStack(spacing: Spacing.md) {
-            // Type picker
-            Picker("Type", selection: $selectedType) {
-                ForEach(RandomType.allCases, id: \.self) { type in
-                    Label(type.rawValue, systemImage: type.icon).tag(type)
-                }
-            }
-            .pickerStyle(.segmented)
-
-            // Period (hidden for loved)
-            if selectedType != .loved {
-                Picker("Period", selection: $period) {
-                    ForEach(LastFMPeriod.allCases, id: \.self) { p in
-                        Text(p.displayName).tag(p)
+    private var controlsCard: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
+                Picker("Type", selection: $selectedType) {
+                    ForEach(RandomType.allCases, id: \.self) { type in
+                        Label(type.rawValue, systemImage: type.icon).tag(type)
                     }
                 }
-                .frame(width: 150)
-            }
+                .pickerStyle(.segmented)
 
-            // Roll button
-            Button {
-                Task { await loadRandom() }
-            } label: {
-                Label("Roll", systemImage: "dice.fill")
+                HStack(spacing: Layout.sectionSpacing) {
+                    if selectedType != .loved {
+                        Picker("Period", selection: $period) {
+                            ForEach(LastFMPeriod.allCases, id: \.self) { p in
+                                Text(p.displayName).tag(p)
+                            }
+                        }
+                        .frame(maxWidth: 220)
+                    }
+
+                    Spacer()
+
+                    Button {
+                        Task { await loadRandom() }
+                    } label: {
+                        Label("Roll", systemImage: "dice.fill")
+                    }
+                    .prominentGlassButton()
+                    .disabled(isLoading)
+                    .keyboardShortcut(.return, modifiers: [])
+                }
             }
-            .buttonStyle(.borderedProminent)
-            .disabled(isLoading)
         }
     }
 
@@ -103,127 +97,109 @@ struct RandomView: View {
     @ViewBuilder
     private var resultView: some View {
         if isLoading {
-            VStack(spacing: Spacing.md) {
-                Spacer(minLength: 40)
-                ProgressView()
-                    .controlSize(.large)
+            VStack(spacing: Layout.sectionSpacing) {
+                ProgressView().controlSize(.large)
                 Text("Finding something…")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
-                Spacer(minLength: 40)
             }
             .frame(maxWidth: .infinity)
+            .padding(.vertical, 60)
         } else if let error {
             ContentUnavailableView(
                 "No Result",
                 systemImage: "dice",
                 description: Text(error)
             )
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, Spacing.xl)
+            .padding(.vertical, 40)
         } else if let result {
-            GlassCard(spacing: Spacing.lg) {
-                VStack(spacing: Spacing.lg) {
-                    HStack(spacing: Spacing.lg) {
-                        // Artwork
-                        AsyncImage(url: result.imageURL) { phase in
-                            switch phase {
-                            case .success(let img):
-                                img.resizable()
-                                    .aspectRatio(contentMode: .fill)
-                                    .frame(width: 160, height: 160)
-                                    .clipShape(RoundedRectangle(cornerRadius: 14))
-                            default:
-                                RoundedRectangle(cornerRadius: 14)
-                                    .fill(Color.secondary.opacity(0.1))
-                                    .frame(width: 160, height: 160)
-                                    .overlay {
-                                        Image(systemName: selectedType.icon)
-                                            .font(.system(size: 40))
-                                            .foregroundStyle(.tertiary)
-                                    }
-                            }
-                        }
-                        .frame(width: 160, height: 160)
-                        .shadow(color: .black.opacity(0.15), radius: 8, y: 4)
+            resultCard(result)
+                .transition(.asymmetric(
+                    insertion: .scale(scale: 0.96).combined(with: .opacity),
+                    removal: .opacity
+                ))
+        } else {
+            ContentUnavailableView(
+                "Press Roll",
+                systemImage: "dice",
+                description: Text("Discover a random entry from your library.")
+            )
+            .padding(.vertical, 40)
+        }
+    }
 
-                        VStack(alignment: .leading, spacing: Spacing.sm) {
-                            Text(result.name)
-                                .font(.title2.weight(.semibold))
-                                .lineLimit(2)
+    private func resultCard(_ result: RandomResult) -> some View {
+        HStack(spacing: Layout.sectionSpacing) {
+            AsyncArtwork(
+                subject: artworkSubject(for: result),
+                hint: result.imageURL,
+                placeholderSymbol: selectedType.icon,
+                cornerRadius: 12
+            )
+            .frame(width: 160, height: 160)
+            .shadow(color: .black.opacity(0.15), radius: 6, y: 3)
 
-                            if let subtitle = result.subtitle {
-                                Text(subtitle)
-                                    .font(.body)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                            }
+            VStack(alignment: .leading, spacing: Layout.inlineSpacing) {
+                Text(result.name)
+                    .font(.title2.weight(.semibold))
+                    .lineLimit(2)
 
-                            if let pc = result.playcount, pc > 0 {
-                                HStack(spacing: 4) {
-                                    Image(systemName: "play.circle.fill")
-                                        .font(.system(size: 12))
-                                    Text("\(pc) plays")
-                                        .font(.system(size: 12))
-                                }
-                                .foregroundStyle(.tertiary)
-                            }
+                if let subtitle = result.subtitle {
+                    Text(subtitle)
+                        .font(.body)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
 
-                            Spacer()
+                if let pc = result.playcount, pc > 0 {
+                    Label("\(pc.formatted()) plays", systemImage: "play.circle.fill")
+                        .font(.callout)
+                        .foregroundStyle(.tertiary)
+                }
 
-                            HStack(spacing: Spacing.sm) {
-                                if let track = result.track {
-                                    Button {
-                                        selectedTrack = track
-                                    } label: {
-                                        Label("Info", systemImage: "info.circle")
-                                            .font(.system(size: 12))
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
-                                }
+                Spacer()
 
-                                if let urlStr = result.url, let url = URL(string: urlStr) {
-                                    Button {
-                                        NSWorkspace.shared.open(url)
-                                    } label: {
-                                        Label("Open", systemImage: "safari")
-                                            .font(.system(size: 12))
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
-                                }
-
-                                Button {
-                                    Task { await loadRandom() }
-                                } label: {
-                                    Label("Next", systemImage: "forward.fill")
-                                        .font(.system(size: 12))
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
-                            }
+                HStack(spacing: Layout.inlineSpacing) {
+                    if let track = result.track {
+                        Button {
+                            selectedTrack = track
+                        } label: {
+                            Label("Info", systemImage: "info.circle")
                         }
                     }
+
+                    if let urlStr = result.url, let url = URL(string: urlStr) {
+                        Button {
+                            NSWorkspace.shared.open(url)
+                        } label: {
+                            Label("Open", systemImage: "safari")
+                        }
+                    }
+
+                    Button {
+                        Task { await loadRandom() }
+                    } label: {
+                        Label("Next", systemImage: "forward.fill")
+                    }
+                    .prominentGlassButton()
                 }
+                .controlSize(.regular)
             }
-            .transition(.asymmetric(
-                insertion: .scale(scale: 0.95).combined(with: .opacity),
-                removal: .opacity
-            ))
-        } else {
-            VStack(spacing: Spacing.md) {
-                Spacer(minLength: 60)
-                Image(systemName: "dice")
-                    .font(.system(size: 48))
-                    .foregroundStyle(.quaternary)
-                Text("Press Roll to discover something from your library")
-                    .font(.subheadline)
-                    .foregroundStyle(.tertiary)
-                Spacer(minLength: 60)
-            }
-            .frame(maxWidth: .infinity)
         }
+        .heroGlass()
+    }
+
+    private func artworkSubject(for result: RandomResult) -> ArtworkCache.Subject {
+        if let artist = result.artist {
+            return .artist(name: artist.name)
+        }
+        if let album = result.album {
+            return .album(artist: album.artist?.name ?? "", name: album.name)
+        }
+        if let track = result.track {
+            return .track(artist: track.artist.name, title: track.name)
+        }
+        return .artist(name: result.name)
     }
 
     // MARK: - Data Loading

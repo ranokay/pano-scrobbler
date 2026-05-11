@@ -1,6 +1,7 @@
-import SwiftUI
+import AppKit
 import Core
 import Services
+import SwiftUI
 
 /// Search and preview album artwork from iTunes and Deezer.
 struct ImageSearchView: View {
@@ -12,89 +13,45 @@ struct ImageSearchView: View {
     @State private var searchTask: Task<Void, Never>?
 
     private let service = ArtworkLookupService()
-    private let columns = [GridItem(.adaptive(minimum: 150, maximum: 200), spacing: Spacing.md)]
+    private let columns = [GridItem(.adaptive(minimum: 150, maximum: 200), spacing: Layout.sectionSpacing)]
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                header
-                searchBar
-                resultsGrid
+            if results.isEmpty && !isSearching {
+                ContentUnavailableView(
+                    "Find Artwork",
+                    systemImage: "photo.on.rectangle.angled",
+                    description: Text("Search for artist, album, or track artwork.")
+                )
+                .padding(.vertical, 80)
+            } else {
+                LazyVGrid(columns: columns, spacing: Layout.sectionSpacing) {
+                    ForEach(results) { result in
+                        artworkCard(result)
+                    }
+                }
+                .padding(Layout.windowPadding)
             }
-            .padding(Spacing.lg)
+        }
+        .navigationSubtitle(isSearching ? "Searching…" : "")
+        .searchable(text: $query, placement: .toolbar, prompt: "Artist, album, or track")
+        .onSubmit(of: .search) { performSearch() }
+        .toolbar {
+            if isSearching {
+                ToolbarItem(placement: .status) {
+                    ProgressView().controlSize(.small)
+                }
+            }
         }
         .sheet(item: $selectedResult) { result in
             artworkDetailSheet(result)
         }
     }
 
-    // MARK: - Header
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            Text("Artwork Search")
-                .font(.displayLarge)
-            Text("Find album and artist artwork from iTunes and Deezer.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    // MARK: - Search Bar
-
-    private var searchBar: some View {
-        HStack(spacing: Spacing.md) {
-            HStack(spacing: Spacing.sm) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField("Search artist, album, or track…", text: $query)
-                    .textFieldStyle(.plain)
-                    .onSubmit { performSearch() }
-
-                if isSearching {
-                    ProgressView()
-                        .scaleEffect(0.6)
-                }
-            }
-            .padding(Spacing.sm)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-
-            Button("Search") {
-                performSearch()
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(query.trimmingCharacters(in: .whitespaces).isEmpty || isSearching)
-        }
-    }
-
-    // MARK: - Results Grid
-
-    @ViewBuilder
-    private var resultsGrid: some View {
-        if results.isEmpty && !isSearching {
-            VStack(spacing: Spacing.md) {
-                Spacer(minLength: 60)
-                Image(systemName: "photo.on.rectangle.angled")
-                    .font(.system(size: 40))
-                    .foregroundStyle(.quaternary)
-                Text("Search for artwork to get started")
-                    .font(.system(size: 13))
-                    .foregroundStyle(.tertiary)
-                Spacer()
-            }
-            .frame(maxWidth: .infinity)
-        } else {
-            LazyVGrid(columns: columns, spacing: Spacing.md) {
-                ForEach(results) { result in
-                    artworkCard(result)
-                }
-            }
-        }
-    }
+    // MARK: - Card
 
     private func artworkCard(_ result: ArtworkResult) -> some View {
-        VStack(spacing: Spacing.xs) {
-            // Thumbnail
+        VStack(spacing: Layout.inlineSpacing) {
             AsyncImage(url: result.thumbnailURL) { phase in
                 switch phase {
                 case .success(let image):
@@ -103,108 +60,146 @@ struct ImageSearchView: View {
                         .aspectRatio(1, contentMode: .fill)
                 case .failure:
                     Rectangle()
-                        .fill(.quaternary)
+                        .fill(.background.tertiary)
                         .overlay {
                             Image(systemName: "photo")
                                 .foregroundStyle(.tertiary)
                         }
                 case .empty:
                     Rectangle()
-                        .fill(.quaternary)
-                        .overlay { ProgressView().scaleEffect(0.6) }
+                        .fill(.background.tertiary)
+                        .overlay { ProgressView().controlSize(.small) }
                 @unknown default:
-                    Rectangle().fill(.quaternary)
+                    Rectangle().fill(.background.tertiary)
                 }
             }
             .aspectRatio(1, contentMode: .fit)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
 
-            // Info
-            VStack(alignment: .leading, spacing: 1) {
+            VStack(alignment: .leading, spacing: 2) {
                 Text(result.title)
-                    .font(.system(size: 11, weight: .medium))
+                    .font(.callout.weight(.medium))
                     .lineLimit(1)
                 Text(result.artist)
-                    .font(.system(size: 10))
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                 Text(result.source.rawValue)
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.caption2.weight(.medium))
                     .foregroundStyle(.tertiary)
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(Spacing.sm)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10))
+        .padding(Layout.inlineSpacing)
+        .background(.background.tertiary, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .overlay {
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .strokeBorder(.quaternary, lineWidth: 1)
+        }
         .onTapGesture { selectedResult = result }
         .contentShape(Rectangle())
+        .contextMenu {
+            if let url = result.imageURL ?? result.thumbnailURL {
+                Button {
+                    NSPasteboard.general.clearContents()
+                    NSPasteboard.general.setString(url.absoluteString, forType: .string)
+                } label: {
+                    Label("Copy URL", systemImage: "doc.on.doc")
+                }
+
+                Button {
+                    saveArtwork(url: url, name: "\(result.artist) - \(result.title)")
+                } label: {
+                    Label("Save Image…", systemImage: "square.and.arrow.down")
+                }
+            }
+        }
     }
 
     // MARK: - Detail Sheet
 
     private func artworkDetailSheet(_ result: ArtworkResult) -> some View {
-        VStack(spacing: Spacing.lg) {
-            Text(result.title)
-                .font(.title2.weight(.semibold))
-
-            Text(result.artist)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-
-            AsyncImage(url: result.imageURL ?? result.thumbnailURL) { phase in
-                switch phase {
-                case .success(let image):
-                    image
-                        .resizable()
-                        .aspectRatio(1, contentMode: .fit)
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                case .failure:
-                    Rectangle()
-                        .fill(.quaternary)
-                        .aspectRatio(1, contentMode: .fit)
-                        .overlay {
-                            Image(systemName: "exclamationmark.triangle")
-                                .foregroundStyle(.tertiary)
-                        }
-                case .empty:
-                    ProgressView()
-                        .frame(width: 300, height: 300)
-                @unknown default:
-                    EmptyView()
+        VStack(spacing: 0) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(result.title)
+                        .font(.title3.weight(.semibold))
+                        .lineLimit(1)
+                    Text(result.artist)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
                 }
+                Spacer()
+                Button {
+                    selectedResult = nil
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.title2)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.borderless)
+                .keyboardShortcut(.cancelAction)
             }
-            .frame(maxWidth: 400, maxHeight: 400)
+            .padding(Layout.windowPadding)
 
-            HStack(spacing: Spacing.md) {
-                if let url = result.imageURL ?? result.thumbnailURL {
-                    Button {
-                        saveArtwork(url: url, name: "\(result.artist) - \(result.title)")
-                    } label: {
-                        Label("Save Image", systemImage: "square.and.arrow.down")
+            Divider()
+
+            ScrollView {
+                AsyncImage(url: result.imageURL ?? result.thumbnailURL) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image
+                            .resizable()
+                            .aspectRatio(1, contentMode: .fit)
+                            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+                    case .failure:
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
+                            .fill(.background.tertiary)
+                            .aspectRatio(1, contentMode: .fit)
+                            .overlay {
+                                Image(systemName: "exclamationmark.triangle")
+                                    .foregroundStyle(.tertiary)
+                            }
+                    case .empty:
+                        ProgressView()
+                            .frame(width: 300, height: 300)
+                    @unknown default:
+                        EmptyView()
                     }
-                    .buttonStyle(.borderedProminent)
+                }
+                .padding(Layout.windowPadding)
+            }
+            .frame(maxHeight: 460)
 
+            Divider()
+
+            HStack(spacing: Layout.inlineSpacing) {
+                Text("Source: \(result.source.rawValue)")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+
+                Spacer()
+
+                if let url = result.imageURL ?? result.thumbnailURL {
                     Button {
                         NSPasteboard.general.clearContents()
                         NSPasteboard.general.setString(url.absoluteString, forType: .string)
                     } label: {
                         Label("Copy URL", systemImage: "doc.on.doc")
                     }
-                    .buttonStyle(.bordered)
-                }
 
-                Button("Close") {
-                    selectedResult = nil
+                    Button {
+                        saveArtwork(url: url, name: "\(result.artist) - \(result.title)")
+                    } label: {
+                        Label("Save Image…", systemImage: "square.and.arrow.down")
+                    }
+                    .prominentGlassButton()
                 }
-                .buttonStyle(.bordered)
             }
-
-            Text("Source: \(result.source.rawValue)")
-                .font(.system(size: 10))
-                .foregroundStyle(.tertiary)
+            .padding(Layout.windowPadding)
         }
-        .padding(Spacing.xl)
-        .frame(minWidth: 450, minHeight: 500)
+        .frame(minWidth: 480, minHeight: 540)
     }
 
     // MARK: - Actions
@@ -212,7 +207,10 @@ struct ImageSearchView: View {
     private func performSearch() {
         searchTask?.cancel()
         let q = query.trimmingCharacters(in: .whitespaces)
-        guard !q.isEmpty else { return }
+        guard !q.isEmpty else {
+            results = []
+            return
+        }
 
         isSearching = true
         searchTask = Task {

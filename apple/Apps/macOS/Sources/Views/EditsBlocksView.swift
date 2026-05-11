@@ -6,186 +6,278 @@ struct EditsBlocksView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                VStack(alignment: .leading, spacing: Spacing.xs) {
-                    Text("Edits & Blocks")
-                        .font(.displayLarge)
-                    Text("Transform or block scrobbles before they're submitted.")
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                }
-
-                HStack(spacing: Spacing.md) {
-                    PipelineBadge(icon: "pencil.line", label: "Simple", count: model.metadataRules.simpleEdits.count, color: AccentColors.primary)
-                    PipelineBadge(icon: "textformat.abc", label: "Regex", count: model.metadataRules.regexEdits.count, color: AccentColors.secondary)
-                    PipelineBadge(icon: "hand.raised.fill", label: "Blocks", count: model.metadataRules.blockRules.count, color: AccentColors.error)
-                }
-
+            VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
                 SimpleEditsPanel(model: model)
                 RegexEditsPanel(model: model)
                 BlockRulesPanel(model: model)
             }
-            .padding(Spacing.lg)
+            .padding(Layout.windowPadding)
+            .frame(maxWidth: 900, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .navigationSubtitle("Transform or block scrobbles before they're submitted")
     }
 }
 
-private struct PipelineBadge: View {
-    var icon: String; var label: String; var count: Int; var color: Color
-    var body: some View {
-        GlassCard(spacing: Spacing.md) {
-            HStack(spacing: Spacing.sm) {
-                Image(systemName: icon).font(.system(size: 13, weight: .medium)).foregroundStyle(color)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(label).font(.metricLabel).foregroundStyle(.secondary).textCase(.uppercase)
-                    Text("\(count)").font(.metricValue).contentTransition(.numericText())
-                }
-            }
-        }
-    }
-}
+// MARK: - Simple Edits
 
 private struct SimpleEditsPanel: View {
     @ObservedObject var model: AppModel
     @State private var isExpanded = true
-    @State private var matchArtist = ""; @State private var matchTrack = ""
-    @State private var replacementArtist = ""; @State private var replacementTrack = ""
-    @State private var replacementAlbum = ""; @State private var replacementAlbumArtist = ""
+    @State private var matchArtist = ""
+    @State private var matchTrack = ""
+    @State private var replacementArtist = ""
+    @State private var replacementTrack = ""
+    @State private var replacementAlbum = ""
+    @State private var replacementAlbumArtist = ""
 
     var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                GlassCard {
-                    VStack(alignment: .leading, spacing: Spacing.sm) {
-                        Grid(alignment: .leading, horizontalSpacing: Spacing.sm, verticalSpacing: Spacing.sm) {
-                            GridRow { TextField("Match artist", text: $matchArtist); TextField("Match track", text: $matchTrack) }
-                            GridRow { TextField("New artist", text: $replacementArtist); TextField("New track", text: $replacementTrack) }
-                            GridRow { TextField("New album", text: $replacementAlbum); TextField("New album artist", text: $replacementAlbumArtist) }
-                        }.textFieldStyle(.roundedBorder)
-                        HStack {
-                            Spacer()
-                            Button { addEdit() } label: { Label("Add Edit", systemImage: "plus") }
-                                
-                                .disabled(matchArtist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || matchTrack.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        CollapsibleGroupBox(isExpanded: $isExpanded) {
+            HStack(spacing: Layout.inlineSpacing) {
+                Label("Simple Edits", systemImage: "pencil.line")
+                    .font(.headline)
+                Spacer()
+                Text("\(model.metadataRules.simpleEdits.count)")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+        } content: {
+            VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
+                    Grid(alignment: .leading, horizontalSpacing: Layout.inlineSpacing, verticalSpacing: Layout.inlineSpacing) {
+                        GridRow {
+                            TextField("Match artist", text: $matchArtist)
+                            TextField("Match track", text: $matchTrack)
+                        }
+                        GridRow {
+                            TextField("New artist", text: $replacementArtist)
+                            TextField("New track", text: $replacementTrack)
+                        }
+                        GridRow {
+                            TextField("New album", text: $replacementAlbum)
+                            TextField("New album artist", text: $replacementAlbumArtist)
                         }
                     }
-                }
-                ForEach(Array(model.metadataRules.simpleEdits.enumerated()), id: \.element.id) { index, edit in
-                    GlassCard(spacing: Spacing.sm) {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text("\(edit.matchArtist) — \(edit.matchTrack)").font(.system(size: 13, weight: .semibold))
-                                Text(summary(edit)).font(.system(size: 11)).foregroundStyle(.secondary)
+                    .textFieldStyle(.roundedBorder)
+
+                    HStack {
+                        Spacer()
+                        Button {
+                            addEdit()
+                        } label: {
+                            Label("Add Edit", systemImage: "plus")
+                        }
+                        .disabled(
+                            matchArtist.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                || matchTrack.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                        )
+                    }
+
+                    if !model.metadataRules.simpleEdits.isEmpty {
+                        Divider()
+
+                        VStack(spacing: 0) {
+                            ForEach(Array(model.metadataRules.simpleEdits.enumerated()), id: \.element.id) { index, edit in
+                                editRow(edit: edit, index: index)
+                                if index < model.metadataRules.simpleEdits.count - 1 {
+                                    Divider()
+                                }
                             }
-                            Spacer()
-                            Button(role: .destructive) { withAnimation(.spring(duration: 0.3)) { model.removeSimpleEdits(at: IndexSet(integer: index)) } } label: { Image(systemName: "trash").font(.system(size: 11)) }.buttonStyle(.borderless)
                         }
                     }
                 }
-            }.padding(.top, Spacing.sm)
-        } label: {
-            Label { HStack { Text("Simple Edits").font(.displaySmall); Spacer(); StatusBadge(count: model.metadataRules.simpleEdits.count, color: AccentColors.primary) } } icon: { Image(systemName: "pencil.line").foregroundStyle(AccentColors.primary) }
+            }
+    }
+
+    private func editRow(edit: SimpleEdit, index: Int) -> some View {
+        HStack(spacing: Layout.inlineSpacing) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(edit.matchArtist) — \(edit.matchTrack)")
+                    .font(.callout.weight(.medium))
+                Text(summary(edit))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer()
+            Button(role: .destructive) {
+                withAnimation {
+                    model.removeSimpleEdits(at: IndexSet(integer: index))
+                }
+            } label: {
+                Image(systemName: "trash")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
         }
+        .padding(.vertical, 6)
     }
 
     private func addEdit() {
-        model.addSimpleEdit(matchArtist: matchArtist, matchTrack: matchTrack, replacementArtist: replacementArtist, replacementTrack: replacementTrack, replacementAlbum: replacementAlbum, replacementAlbumArtist: replacementAlbumArtist)
-        matchArtist = ""; matchTrack = ""; replacementArtist = ""; replacementTrack = ""; replacementAlbum = ""; replacementAlbumArtist = ""
+        model.addSimpleEdit(
+            matchArtist: matchArtist,
+            matchTrack: matchTrack,
+            replacementArtist: replacementArtist,
+            replacementTrack: replacementTrack,
+            replacementAlbum: replacementAlbum,
+            replacementAlbumArtist: replacementAlbumArtist
+        )
+        matchArtist = ""
+        matchTrack = ""
+        replacementArtist = ""
+        replacementTrack = ""
+        replacementAlbum = ""
+        replacementAlbumArtist = ""
     }
 
     private func summary(_ edit: SimpleEdit) -> String {
-        [edit.replacementArtist.map { "artist → \($0)" }, edit.replacementTrack.map { "track → \($0)" }, edit.replacementAlbum.map { "album → \($0)" }, edit.replacementAlbumArtist.map { "album artist → \($0)" }].compactMap { $0 }.joined(separator: ", ")
+        [
+            edit.replacementArtist.map { "artist → \($0)" },
+            edit.replacementTrack.map { "track → \($0)" },
+            edit.replacementAlbum.map { "album → \($0)" },
+            edit.replacementAlbumArtist.map { "album artist → \($0)" }
+        ]
+        .compactMap { $0 }
+        .joined(separator: ", ")
     }
 }
+
+// MARK: - Regex Edits
 
 private struct RegexEditsPanel: View {
     @ObservedObject var model: AppModel
     @State private var isExpanded = false
     @State private var field: RegexEdit.Field = .track
-    @State private var pattern = ""; @State private var replacement = ""
+    @State private var pattern = ""
+    @State private var replacement = ""
     @State private var testInput = ""
     @State private var showTest = false
 
     var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                GlassCard {
-                    HStack(spacing: Spacing.sm) {
-                        Picker("Field", selection: $field) { ForEach(RegexEdit.Field.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.frame(width: 140)
-                        TextField("Pattern", text: $pattern).textFieldStyle(.roundedBorder)
-                        Image(systemName: "arrow.right").foregroundStyle(.tertiary).font(.system(size: 11))
-                        TextField("Replacement", text: $replacement).textFieldStyle(.roundedBorder)
-                        Button { model.addRegexEdit(field: field, pattern: pattern, replacement: replacement); pattern = ""; replacement = "" } label: { Label("Add", systemImage: "plus") }.disabled(pattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        CollapsibleGroupBox(isExpanded: $isExpanded) {
+            HStack(spacing: Layout.inlineSpacing) {
+                Label("Regex Edits", systemImage: "textformat.abc")
+                    .font(.headline)
+                Spacer()
+                Text("\(model.metadataRules.regexEdits.count)")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+        } content: {
+            VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
+                HStack(spacing: Layout.inlineSpacing) {
+                    Picker("Field", selection: $field) {
+                        ForEach(RegexEdit.Field.allCases, id: \.self) {
+                            Text($0.rawValue).tag($0)
+                        }
                     }
+                    .labelsHidden()
+                    .frame(width: 140)
+
+                    TextField("Pattern", text: $pattern)
+                        .textFieldStyle(.roundedBorder)
+                    Image(systemName: "arrow.right")
+                        .foregroundStyle(.tertiary)
+                    TextField("Replacement", text: $replacement)
+                        .textFieldStyle(.roundedBorder)
+
+                    Button {
+                        model.addRegexEdit(field: field, pattern: pattern, replacement: replacement)
+                        pattern = ""
+                        replacement = ""
+                    } label: {
+                        Label("Add", systemImage: "plus")
+                    }
+                    .disabled(pattern.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
 
-                // Regex test area
-                GlassCard {
-                    VStack(alignment: .leading, spacing: Spacing.sm) {
-                        HStack {
-                            Button {
-                                withAnimation(.easeInOut(duration: 0.2)) { showTest.toggle() }
-                            } label: {
-                                Label("Test Regex", systemImage: showTest ? "flask.fill" : "flask")
-                                    .font(.system(size: 12, weight: .medium))
+                DisclosureGroup(isExpanded: $showTest) {
+                    VStack(alignment: .leading, spacing: Layout.inlineSpacing) {
+                        TextField("Enter test text…", text: $testInput)
+                            .textFieldStyle(.roundedBorder)
+                            .font(.callout.monospaced())
+
+                        if !testInput.isEmpty {
+                            regexTestResults
+                        }
+                    }
+                    .padding(.top, Layout.inlineSpacing)
+                } label: {
+                    Label("Test Regex", systemImage: "flask")
+                        .font(.callout)
+                }
+
+                if !model.metadataRules.regexEdits.isEmpty {
+                    Divider()
+
+                    VStack(spacing: 0) {
+                        ForEach(Array(model.metadataRules.regexEdits.enumerated()), id: \.element.id) { index, edit in
+                            regexRow(edit: edit, index: index)
+                            if index < model.metadataRules.regexEdits.count - 1 {
+                                Divider()
                             }
-                            .buttonStyle(.borderless)
-                            Spacer()
-                        }
-
-                        if showTest {
-                            TextField("Enter test text…", text: $testInput)
-                                .textFieldStyle(.roundedBorder)
-                                .font(.system(size: 13, design: .monospaced))
-
-                            if !testInput.isEmpty {
-                                regexTestResults
-                            }
                         }
                     }
                 }
-
-                ForEach(Array(model.metadataRules.regexEdits.enumerated()), id: \.element.id) { index, edit in
-                    GlassCard(spacing: Spacing.sm) {
-                        HStack(spacing: Spacing.sm) {
-                            Text(edit.field.rawValue).font(.system(size: 11, weight: .semibold, design: .rounded)).foregroundStyle(AccentColors.secondary).padding(.horizontal, 8).padding(.vertical, 3).background(AccentColors.secondary.opacity(0.12), in: Capsule())
-                            Text(edit.pattern).font(.system(size: 12, design: .monospaced))
-                            Image(systemName: "arrow.right").foregroundStyle(.tertiary).font(.system(size: 10))
-                            Text(edit.replacement).font(.system(size: 12, design: .monospaced)).foregroundStyle(.secondary)
-                            Spacer()
-                            Button(role: .destructive) { withAnimation(.spring(duration: 0.3)) { model.removeRegexEdits(at: IndexSet(integer: index)) } } label: { Image(systemName: "trash").font(.system(size: 11)) }.buttonStyle(.borderless)
-                        }
-                    }
-                }
-            }.padding(.top, Spacing.sm)
-        } label: {
-            Label { HStack { Text("Regex Edits").font(.displaySmall); Spacer(); StatusBadge(count: model.metadataRules.regexEdits.count, color: AccentColors.secondary) } } icon: { Image(systemName: "textformat.abc").foregroundStyle(AccentColors.secondary) }
+            }
         }
+    }
+
+    private func regexRow(edit: RegexEdit, index: Int) -> some View {
+        HStack(spacing: Layout.inlineSpacing) {
+            Text(edit.field.rawValue)
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(.tint.opacity(0.15), in: Capsule())
+                .foregroundStyle(.tint)
+
+            Text(edit.pattern)
+                .font(.callout.monospaced())
+            Image(systemName: "arrow.right")
+                .foregroundStyle(.tertiary)
+                .font(.caption)
+            Text(edit.replacement)
+                .font(.callout.monospaced())
+                .foregroundStyle(.secondary)
+
+            Spacer()
+
+            Button(role: .destructive) {
+                withAnimation {
+                    model.removeRegexEdits(at: IndexSet(integer: index))
+                }
+            } label: {
+                Image(systemName: "trash")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(.vertical, 6)
     }
 
     @ViewBuilder
     private var regexTestResults: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
+        VStack(alignment: .leading, spacing: 4) {
             ForEach(model.metadataRules.regexEdits) { edit in
                 let result = testRegex(pattern: edit.pattern, replacement: edit.replacement, input: testInput)
-                HStack(spacing: Spacing.sm) {
+                HStack(spacing: Layout.inlineSpacing) {
                     Image(systemName: result.matches ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(result.matches ? AccentColors.success : .secondary.opacity(0.5))
+                        .foregroundStyle(result.matches ? .green : .secondary)
+                        .font(.caption)
 
                     Text(edit.pattern)
-                        .font(.system(size: 11, design: .monospaced))
+                        .font(.caption.monospaced())
                         .foregroundStyle(result.matches ? .primary : .secondary)
                         .lineLimit(1)
 
                     if result.matches {
                         Image(systemName: "arrow.right")
-                            .font(.system(size: 9))
                             .foregroundStyle(.tertiary)
-
+                            .font(.caption2)
                         Text(result.output)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(AccentColors.success)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.green)
                             .lineLimit(1)
                     }
                 }
@@ -193,35 +285,33 @@ private struct RegexEditsPanel: View {
 
             if model.metadataRules.regexEdits.isEmpty {
                 Text("No regex edits to test.")
-                    .font(.system(size: 11))
+                    .font(.caption)
                     .foregroundStyle(.tertiary)
             }
 
-            // Also test the current unsaved pattern
             if !pattern.isEmpty {
                 Divider()
                 let result = testRegex(pattern: pattern, replacement: replacement, input: testInput)
-                HStack(spacing: Spacing.sm) {
+                HStack(spacing: Layout.inlineSpacing) {
                     Image(systemName: result.matches ? "checkmark.circle.fill" : "xmark.circle.fill")
-                        .font(.system(size: 11))
-                        .foregroundStyle(result.matches ? AccentColors.success : .secondary.opacity(0.5))
+                        .foregroundStyle(result.matches ? .green : .secondary)
+                        .font(.caption)
 
                     Text(pattern)
-                        .font(.system(size: 11, weight: .medium, design: .monospaced))
+                        .font(.caption.monospaced())
                         .foregroundStyle(result.matches ? .primary : .secondary)
 
                     Text("(unsaved)")
-                        .font(.system(size: 10))
+                        .font(.caption2)
                         .foregroundStyle(.tertiary)
 
                     if result.matches {
                         Image(systemName: "arrow.right")
-                            .font(.system(size: 9))
                             .foregroundStyle(.tertiary)
-
+                            .font(.caption2)
                         Text(result.output)
-                            .font(.system(size: 11, design: .monospaced))
-                            .foregroundStyle(AccentColors.success)
+                            .font(.caption.monospaced())
+                            .foregroundStyle(.green)
                     }
                 }
             }
@@ -239,6 +329,8 @@ private struct RegexEditsPanel: View {
     }
 }
 
+// MARK: - Block Rules
+
 private struct BlockRulesPanel: View {
     @ObservedObject var model: AppModel
     @State private var isExpanded = false
@@ -246,31 +338,88 @@ private struct BlockRulesPanel: View {
     @State private var blockValue = ""
 
     var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                GlassCard {
-                    HStack(spacing: Spacing.sm) {
-                        Picker("Field", selection: $blockField) { ForEach(BlockRule.Field.allCases, id: \.self) { Text($0.rawValue).tag($0) } }.frame(width: 140)
-                        TextField("Exact value to block", text: $blockValue).textFieldStyle(.roundedBorder).onSubmit { addBlock() }
-                        Button { addBlock() } label: { Label("Block", systemImage: "nosign") }.disabled(blockValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        CollapsibleGroupBox(isExpanded: $isExpanded) {
+            HStack(spacing: Layout.inlineSpacing) {
+                Label("Block Rules", systemImage: "hand.raised.fill")
+                    .font(.headline)
+                Spacer()
+                Text("\(model.metadataRules.blockRules.count)")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+            }
+        } content: {
+            VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
+                HStack(spacing: Layout.inlineSpacing) {
+                    Picker("Field", selection: $blockField) {
+                        ForEach(BlockRule.Field.allCases, id: \.self) {
+                            Text($0.rawValue).tag($0)
+                        }
                     }
+                    .labelsHidden()
+                    .frame(width: 140)
+
+                    TextField("Exact value to block", text: $blockValue)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit { addBlock() }
+
+                    Button {
+                        addBlock()
+                    } label: {
+                        Label("Block", systemImage: "nosign")
+                    }
+                    .disabled(blockValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
-                ForEach(Array(model.metadataRules.blockRules.enumerated()), id: \.element.id) { index, rule in
-                    GlassCard(spacing: Spacing.sm) {
-                        HStack(spacing: Spacing.sm) {
-                            Text(rule.field.rawValue).font(.system(size: 11, weight: .semibold, design: .rounded)).foregroundStyle(AccentColors.error).padding(.horizontal, 8).padding(.vertical, 3).background(AccentColors.error.opacity(0.12), in: Capsule())
-                            Text(rule.value).font(.system(size: 13, weight: .medium))
-                            Spacer()
-                            Text(rule.action.rawValue).font(.system(size: 11, design: .rounded)).foregroundStyle(.secondary)
-                            Button(role: .destructive) { withAnimation(.spring(duration: 0.3)) { model.removeBlockRules(at: IndexSet(integer: index)) } } label: { Image(systemName: "trash").font(.system(size: 11)) }.buttonStyle(.borderless)
+
+                if !model.metadataRules.blockRules.isEmpty {
+                    Divider()
+
+                    VStack(spacing: 0) {
+                        ForEach(Array(model.metadataRules.blockRules.enumerated()), id: \.element.id) { index, rule in
+                            blockRow(rule: rule, index: index)
+                            if index < model.metadataRules.blockRules.count - 1 {
+                                Divider()
+                            }
                         }
                     }
                 }
-            }.padding(.top, Spacing.sm)
-        } label: {
-            Label { HStack { Text("Block Rules").font(.displaySmall); Spacer(); StatusBadge(count: model.metadataRules.blockRules.count, color: AccentColors.error) } } icon: { Image(systemName: "hand.raised.fill").foregroundStyle(AccentColors.error) }
+            }
         }
     }
 
-    private func addBlock() { model.addBlockRule(field: blockField, value: blockValue); blockValue = "" }
+    private func blockRow(rule: BlockRule, index: Int) -> some View {
+        HStack(spacing: Layout.inlineSpacing) {
+            Text(rule.field.rawValue)
+                .font(.caption.weight(.semibold))
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(.red.opacity(0.15), in: Capsule())
+                .foregroundStyle(.red)
+
+            Text(rule.value)
+                .font(.callout.weight(.medium))
+
+            Spacer()
+
+            Text(rule.action.rawValue)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+
+            Button(role: .destructive) {
+                withAnimation {
+                    model.removeBlockRules(at: IndexSet(integer: index))
+                }
+            } label: {
+                Image(systemName: "trash")
+                    .foregroundStyle(.secondary)
+            }
+            .buttonStyle(.borderless)
+        }
+        .padding(.vertical, 6)
+    }
+
+    private func addBlock() {
+        model.addBlockRule(field: blockField, value: blockValue)
+        blockValue = ""
+    }
 }

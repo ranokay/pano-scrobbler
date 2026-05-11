@@ -20,37 +20,46 @@ struct ContentView: View {
             detailView
                 .navigationTitle(model.selectedSection?.rawValue ?? "Pano Scrobbler")
                 .toolbar {
-                    ToolbarItemGroup {
-                        Button {
-                            Task { await model.reloadServices() }
-                        } label: {
-                            Label("Refresh", systemImage: "arrow.clockwise")
-                        }
-                        .help("Refresh all service connections")
-
-                        Button {
-                            Task { await model.retryPendingNow() }
-                        } label: {
-                            Label("Retry Pending", systemImage: "arrow.triangle.2.circlepath")
-                        }
-                        .help("Retry all pending scrobbles")
+                    ToolbarItem(placement: .status) {
+                        statusPill
                     }
 
-                    ToolbarItemGroup {
-                        Button {
-                            model.importBundle()
-                        } label: {
-                            Label("Import", systemImage: "square.and.arrow.down")
-                        }
+                    ToolbarItem(placement: .primaryAction) {
+                        Menu {
+                            Button {
+                                Task { await model.reloadServices() }
+                            } label: {
+                                Label("Refresh Services", systemImage: "arrow.clockwise")
+                            }
+                            .help("Re-initialize service connections")
 
-                        Button {
-                            model.exportBundle()
+                            Button {
+                                Task { await model.retryPendingNow() }
+                            } label: {
+                                Label("Retry Pending Scrobbles", systemImage: "arrow.triangle.2.circlepath")
+                            }
+
+                            Divider()
+
+                            Button {
+                                model.importBundle()
+                            } label: {
+                                Label("Import Settings…", systemImage: "square.and.arrow.down")
+                            }
+
+                            Button {
+                                model.exportBundle()
+                            } label: {
+                                Label("Export Settings…", systemImage: "square.and.arrow.up")
+                            }
                         } label: {
-                            Label("Export", systemImage: "square.and.arrow.up")
+                            Label("More", systemImage: "ellipsis.circle")
                         }
                     }
                 }
         }
+        .artworkCache(model.artworkCache)
+        .adaptiveWindowBackground()
         .overlay {
             if isDragOver {
                 RoundedRectangle(cornerRadius: 12)
@@ -95,43 +104,47 @@ struct ContentView: View {
             }
         }
         .listStyle(.sidebar)
-        .safeAreaInset(edge: .bottom) {
-            SidebarFooter(state: model.status.state)
-                .padding(.horizontal, 14)
-                .padding(.bottom, 10)
-        }
-        .navigationSplitViewColumnWidth(min: 200, ideal: 240, max: 300)
-    }
-
-    private func sidebarLabel(_ section: AppSection) -> some View {
-        Label {
-            HStack {
-                Text(section.rawValue)
-                Spacer()
-                sidebarBadge(for: section)
-            }
-        } icon: {
-            Image(systemName: section.filledSystemImage)
-                .symbolRenderingMode(.hierarchical)
-        }
-        .tag(section)
+        .navigationSplitViewColumnWidth(min: 200, ideal: 220, max: 280)
     }
 
     @ViewBuilder
-    private func sidebarBadge(for section: AppSection) -> some View {
+    private func sidebarLabel(_ section: AppSection) -> some View {
+        Label(section.rawValue, systemImage: section.systemImage)
+            .symbolRenderingMode(.hierarchical)
+            .badge(sidebarBadgeCount(for: section))
+            .tag(section)
+    }
+
+    private func sidebarBadgeCount(for section: AppSection) -> Int {
         switch section {
         case .nowPlaying:
-            if model.pendingCount > 0 {
-                StatusBadge(count: model.pendingCount, color: AccentColors.warning)
-            }
+            return model.pendingCount
         case .accounts:
-            StatusBadge(
-                count: model.accounts.filter(\.enabled).count,
-                color: AccentColors.success
-            )
+            return model.accounts.filter(\.enabled).count
         default:
-            EmptyView()
+            return 0
         }
+    }
+
+    // MARK: - Status Pill
+
+    private var statusPill: some View {
+        HStack(spacing: 6) {
+            PulsingDot(
+                color: model.status.state.indicatorColor,
+                size: 7,
+                isPulsing: model.status.state == .playing
+            )
+
+            Text(model.status.state.displayLabel)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 4)
+        .interactiveGlass(cornerRadius: 100)
+        .help("Scrobble engine status")
     }
 
     // MARK: - Detail
@@ -196,52 +209,5 @@ struct ContentView: View {
             }
         }
         return false
-    }
-}
-
-// MARK: - Sidebar Footer
-
-private struct SidebarFooter: View {
-    var state: PlaybackState
-
-    var body: some View {
-        HStack(spacing: Spacing.sm) {
-            PulsingDot(
-                color: state.dotColor,
-                size: 7,
-                isPulsing: state == .playing
-            )
-
-            Text(state.displayLabel)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 6)
-    }
-}
-
-// MARK: - AppSection Extensions
-
-extension AppSection {
-    var filledSystemImage: String {
-        switch self {
-        case .nowPlaying: "music.note.list"
-        case .history: "clock.arrow.circlepath"
-        case .charts: "chart.bar.fill"
-        case .friends: "person.2.fill"
-        case .profile: "person.circle.fill"
-        case .search: "magnifyingglass"
-        case .random: "dice.fill"
-        case .collage: "photo.artframe"
-        case .manualScrobble: "pencil.line"
-        case .fileScrobble: "doc.text.fill"
-        case .artworkSearch: "photo.on.rectangle"
-        case .accounts: "person.crop.circle.fill"
-        case .apps: "app.badge.fill"
-        case .edits: "slider.horizontal.3"
-        case .settings: "gearshape.fill"
-        case .logs: "doc.text.fill"
-        }
     }
 }

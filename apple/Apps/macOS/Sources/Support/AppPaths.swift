@@ -11,6 +11,6 @@ struct AppPaths {
 
     static var `default`: AppPaths {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-        return AppPaths(rootDirectory: base.appendingPathComponent("Pano Scrobbler", isDirectory: true))
+        return AppPaths(rootDirectory: base.appendingPathComponent(AppConfiguration.dataDirectoryName, isDirectory: true))
     }
 }

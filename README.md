@@ -29,14 +29,19 @@ yay -S pano-scrobbler-bin
 
 The desktop versions do not use any closed source libraries.
 
-**macOS (Universal, macOS 15+):**
+**macOS (macOS 15+):**
 
-Download `pano-scrobbler-macos-universal.dmg` from the macOS release on
+Download the DMG for your Mac from the macOS release on
 [GitHub Releases](https://github.com/kawaiiDango/pano-scrobbler/releases), open the DMG, and drag
 `Pano Scrobbler.app` to Applications. macOS release tags are named like `macos-438`.
 
-Production macOS releases are built for Apple Silicon and Intel Macs. Release builds are expected
-to be Developer ID signed, hardened-runtime enabled, and notarized before publication.
+- Apple Silicon: `pano-scrobbler-macos-arm64.dmg`
+- Intel: `pano-scrobbler-macos-x64.dmg`
+
+The current macOS releases are intentionally not notarized because this fork does not yet have an
+Apple Developer account. macOS may require you to open System Settings → Privacy & Security and
+choose Open Anyway after the first launch attempt. Managed or corporate Macs may block unnotarized
+apps.
 
 To build the macOS DMG from source, install Xcode or Swift 6.2+, then run:
 
@@ -44,12 +49,12 @@ To build the macOS DMG from source, install Xcode or Swift 6.2+, then run:
 git clone https://github.com/kawaiiDango/pano-scrobbler.git
 cd pano-scrobbler
 swift test --package-path apple
-bash apple/scripts/build_dmg.sh
-open dist/pano-scrobbler-macos-universal.dmg
+ARCHS=arm64 bash apple/scripts/build_dmg.sh
+ARCHS=x86_64 bash apple/scripts/build_dmg.sh
 ```
 
 Local source builds are ad-hoc signed for validation and are not notarized unless Developer ID and
-notary credentials are configured.
+notary credentials are explicitly configured.
 
 **Android (phones, tablets, TVs and Chromebooks):**
 

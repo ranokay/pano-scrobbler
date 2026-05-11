@@ -8,14 +8,16 @@ public final class DiscordRichPresence: @unchecked Sendable {
 
     /// Discord application client ID (register at discord.com/developers)
     private let clientId: String
+    private let appName: String
 
     /// Connection state
     private var socket: Int32 = -1
     private var isConnected = false
     private let queue = DispatchQueue(label: "com.panoscrobbler.discord-rpc", qos: .utility)
 
-    public init(clientId: String) {
+    public init(clientId: String, appName: String = "Pano Scrobbler") {
         self.clientId = clientId
+        self.appName = appName
     }
 
     deinit {
@@ -74,10 +76,10 @@ public final class DiscordRichPresence: @unchecked Sendable {
                 assets["large_text"] = album ?? track
             } else {
                 assets["large_image"] = "pano_scrobbler"
-                assets["large_text"] = "Pano Scrobbler"
+                assets["large_text"] = appName
             }
             assets["small_image"] = "pano_scrobbler"
-            assets["small_text"] = "Pano Scrobbler"
+            assets["small_text"] = appName
 
             var activity: [String: Any] = [
                 "type": 2, // Listening

@@ -1,21 +1,39 @@
-import SwiftUI
 import Core
 import Services
+import SwiftUI
 
 struct ChartsView: View {
     @ObservedObject var model: AppModel
+    @State private var chartType: ChartType = .artists
     @State private var selectedTrack: LastFMTrack?
     @State private var selectedAlbum: LastFMAlbum?
     @State private var selectedArtist: LastFMArtist?
 
+    enum ChartType: String, CaseIterable, Identifiable {
+        case artists = "Artists"
+        case albums = "Albums"
+        case tracks = "Tracks"
+        var id: String { rawValue }
+    }
+
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                header
-                periodPicker
-                chartsContent
+        VStack(spacing: 0) {
+            controlsBar
+
+            Divider()
+
+            chartsContent
+        }
+        .navigationSubtitle(model.chartPeriod.displayName)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    model.loadCharts()
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
+                }
+                .disabled(model.isLoadingCharts)
             }
-            .padding(Spacing.lg)
         }
         .onAppear {
             if model.chartArtists.isEmpty {
@@ -33,105 +51,81 @@ struct ChartsView: View {
         }
     }
 
-    // MARK: - Header
+    // MARK: - Controls
 
-    private var header: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: Spacing.xs) {
-                Text("Charts")
-                    .font(.displayLarge)
-                Text("Your top artists, albums, and tracks.")
-                    .font(.subheadline)
-                    .foregroundStyle(.secondary)
+    private var controlsBar: some View {
+        VStack(spacing: Layout.inlineSpacing) {
+            Picker("Type", selection: $chartType) {
+                ForEach(ChartType.allCases) { type in
+                    Text(type.rawValue).tag(type)
+                }
             }
+            .pickerStyle(.segmented)
+            .labelsHidden()
 
-            Spacer()
-
-            Button {
-                model.loadCharts()
-            } label: {
-                Label("Refresh", systemImage: "arrow.clockwise")
+            Picker("Period", selection: Binding(
+                get: { model.chartPeriod },
+                set: { model.loadCharts(period: $0) }
+            )) {
+                ForEach(LastFMPeriod.allCases, id: \.self) { period in
+                    Text(period.displayName).tag(period)
+                }
             }
-            .disabled(model.isLoadingCharts)
+            .pickerStyle(.segmented)
+            .labelsHidden()
         }
-    }
-
-    // MARK: - Period Picker
-
-    private var periodPicker: some View {
-        Picker("Time Period", selection: Binding(
-            get: { model.chartPeriod },
-            set: { model.loadCharts(period: $0) }
-        )) {
-            ForEach(LastFMPeriod.allCases, id: \.self) { period in
-                Text(period.displayName).tag(period)
-            }
-        }
-        .pickerStyle(.segmented)
+        .padding(.horizontal, Layout.windowPadding)
+        .padding(.vertical, 10)
     }
 
     // MARK: - Content
 
     @ViewBuilder
     private var chartsContent: some View {
-        if model.isLoadingCharts && model.chartArtists.isEmpty {
+        if model.isLoadingCharts && model.chartArtists.isEmpty && model.chartAlbums.isEmpty && model.chartTracks.isEmpty {
             ProgressView("Loading charts…")
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, Spacing.xl)
-        } else if model.chartArtists.isEmpty && model.chartAlbums.isEmpty && model.chartTracks.isEmpty {
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        } else if currentItemsIsEmpty {
             ContentUnavailableView(
                 "No Charts",
                 systemImage: "chart.bar.fill",
                 description: Text("Listen to some music and check back later.")
             )
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, Spacing.xl)
         } else {
-            VStack(alignment: .leading, spacing: Spacing.xl) {
-                chartSection("Top Artists", items: model.chartArtists) { artist in
-                    ChartArtistRow(artist: artist, rank: model.chartArtists.firstIndex(where: { $0.name == artist.name }).map { $0 + 1 } ?? 0)
-                }
-
-                chartSection("Top Albums", items: model.chartAlbums) { album in
-                    ChartAlbumRow(album: album, rank: model.chartAlbums.firstIndex(where: { $0.id == album.id }).map { $0 + 1 } ?? 0)
-                }
-
-                chartSection("Top Tracks", items: model.chartTracks) { track in
-                    ChartTrackRow(track: track, rank: model.chartTracks.firstIndex(where: { $0.id == track.id }).map { $0 + 1 } ?? 0)
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func chartSection<T: Identifiable, Content: View>(
-        _ title: String,
-        items: [T],
-        @ViewBuilder row: @escaping (T) -> Content
-    ) -> some View {
-        if !items.isEmpty {
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                Text(title)
-                    .font(.headline)
-
-                LazyVStack(spacing: Spacing.xs) {
-                    ForEach(items) { item in
-                        row(item)
+            List {
+                switch chartType {
+                case .artists:
+                    ForEach(Array(model.chartArtists.enumerated()), id: \.element.id) { index, artist in
+                        ChartArtistRow(artist: artist, rank: index + 1)
                             .contentShape(Rectangle())
-                            .onTapGesture { onItemTap(item) }
+                            .onTapGesture { selectedArtist = artist }
+                    }
+
+                case .albums:
+                    ForEach(Array(model.chartAlbums.enumerated()), id: \.element.id) { index, album in
+                        ChartAlbumRow(album: album, rank: index + 1)
+                            .contentShape(Rectangle())
+                            .onTapGesture { selectedAlbum = album }
+                    }
+
+                case .tracks:
+                    ForEach(Array(model.chartTracks.enumerated()), id: \.element.id) { index, track in
+                        ChartTrackRow(track: track, rank: index + 1)
+                            .contentShape(Rectangle())
+                            .onTapGesture { selectedTrack = track }
                     }
                 }
             }
+            .listStyle(.inset)
+            .scrollContentBackground(.hidden)
         }
     }
 
-    private func onItemTap<T>(_ item: T) {
-        if let artist = item as? LastFMArtist {
-            selectedArtist = artist
-        } else if let album = item as? LastFMAlbum {
-            selectedAlbum = album
-        } else if let track = item as? LastFMTrack {
-            selectedTrack = track
+    private var currentItemsIsEmpty: Bool {
+        switch chartType {
+        case .artists: return model.chartArtists.isEmpty
+        case .albums: return model.chartAlbums.isEmpty
+        case .tracks: return model.chartTracks.isEmpty
         }
     }
 }
@@ -143,25 +137,31 @@ private struct ChartArtistRow: View {
     var rank: Int
 
     var body: some View {
-        GlassCard(spacing: Spacing.sm) {
-            HStack(spacing: Spacing.md) {
-                RankBadge(rank: rank)
+        HStack(spacing: Layout.sectionSpacing) {
+            RankBadge(rank: rank)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(artist.name)
-                        .font(.system(size: 13, weight: .medium))
-                        .lineLimit(1)
+            AsyncArtwork(
+                subject: .artist(name: artist.name),
+                hint: artist.imageURL,
+                placeholderSymbol: "person.fill"
+            )
+            .frame(width: 40, height: 40)
 
-                    if let plays = artist.playcount?.intValue, plays > 0 {
-                        Text("\(plays) plays")
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                    }
+            VStack(alignment: .leading, spacing: 2) {
+                Text(artist.name)
+                    .font(.body)
+                    .lineLimit(1)
+
+                if let plays = artist.playcount?.intValue, plays > 0 {
+                    Text("\(plays.formatted()) plays")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
-
-                Spacer()
             }
+
+            Spacer()
         }
+        .padding(.vertical, 2)
     }
 }
 
@@ -170,58 +170,39 @@ private struct ChartAlbumRow: View {
     var rank: Int
 
     var body: some View {
-        GlassCard(spacing: Spacing.sm) {
-            HStack(spacing: Spacing.md) {
-                RankBadge(rank: rank)
+        HStack(spacing: Layout.sectionSpacing) {
+            RankBadge(rank: rank)
 
-                if let url = album.imageURL {
-                    AsyncImage(url: url) { phase in
-                        switch phase {
-                        case .success(let image):
-                            image.resizable().aspectRatio(contentMode: .fill)
-                        default:
-                            albumPlaceholder
-                        }
-                    }
-                    .frame(width: 36, height: 36)
-                    .clipShape(RoundedRectangle(cornerRadius: 5, style: .continuous))
-                } else {
-                    albumPlaceholder
-                        .frame(width: 36, height: 36)
-                }
+            AsyncArtwork(
+                subject: .album(artist: album.artist?.name ?? "", name: album.name),
+                hint: album.imageURL,
+                placeholderSymbol: "opticaldisc.fill"
+            )
+            .frame(width: 40, height: 40)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(album.name)
-                        .font(.system(size: 13, weight: .medium))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(album.name)
+                    .font(.body)
+                    .lineLimit(1)
+
+                if let artistName = album.artist?.name {
+                    Text(artistName)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
                         .lineLimit(1)
-
-                    if let artistName = album.artist?.name {
-                        Text(artistName)
-                            .font(.system(size: 11))
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                    }
-
-                    if let plays = album.playcount?.intValue, plays > 0 {
-                        Text("\(plays) plays")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-                    }
                 }
+            }
 
-                Spacer()
+            Spacer()
+
+            if let plays = album.playcount?.intValue, plays > 0 {
+                Text("\(plays.formatted())")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
             }
         }
-    }
-
-    private var albumPlaceholder: some View {
-        RoundedRectangle(cornerRadius: 5, style: .continuous)
-            .fill(.quaternary)
-            .overlay {
-                Image(systemName: "opticaldisc.fill")
-                    .font(.system(size: 14))
-                    .foregroundStyle(.tertiary)
-            }
+        .padding(.vertical, 2)
     }
 }
 
@@ -230,30 +211,37 @@ private struct ChartTrackRow: View {
     var rank: Int
 
     var body: some View {
-        GlassCard(spacing: Spacing.sm) {
-            HStack(spacing: Spacing.md) {
-                RankBadge(rank: rank)
+        HStack(spacing: Layout.sectionSpacing) {
+            RankBadge(rank: rank)
 
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(track.name)
-                        .font(.system(size: 13, weight: .medium))
-                        .lineLimit(1)
+            AsyncArtwork(
+                subject: .track(artist: track.artist.name, title: track.name),
+                hint: track.imageURL,
+                placeholderSymbol: "music.note"
+            )
+            .frame(width: 40, height: 40)
 
-                    Text(track.artist.name)
-                        .font(.system(size: 11))
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(track.name)
+                    .font(.body)
+                    .lineLimit(1)
 
-                    if let plays = track.playcount?.intValue, plays > 0 {
-                        Text("\(plays) plays")
-                            .font(.system(size: 10))
-                            .foregroundStyle(.tertiary)
-                    }
-                }
+                Text(track.artist.name)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
 
-                Spacer()
+            Spacer()
+
+            if let plays = track.playcount?.intValue, plays > 0 {
+                Text("\(plays.formatted())")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
             }
         }
+        .padding(.vertical, 2)
     }
 }
 
@@ -261,18 +249,18 @@ private struct RankBadge: View {
     var rank: Int
 
     var body: some View {
-        Text("#\(rank)")
-            .font(.system(size: 12, weight: .bold, design: .rounded))
+        Text("\(rank)")
+            .font(.callout.weight(.semibold))
             .foregroundStyle(rankColor)
-            .frame(width: 32, alignment: .center)
+            .monospacedDigit()
+            .frame(width: 28, alignment: .trailing)
     }
 
     private var rankColor: Color {
         switch rank {
         case 1: .yellow
-        case 2: Color(hue: 0, saturation: 0, brightness: 0.75)
-        case 3: Color(hue: 0.07, saturation: 0.6, brightness: 0.75)
-        default: .secondary
+        case 2, 3: .secondary
+        default: Color(nsColor: .tertiaryLabelColor)
         }
     }
 }

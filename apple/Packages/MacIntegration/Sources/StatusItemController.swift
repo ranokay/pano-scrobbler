@@ -11,9 +11,11 @@ public final class StatusItemController: NSObject {
     public var onSkip: (() -> Void)?
 
     private let statusItem: NSStatusItem
+    private let appName: String
     private var currentStatus = NowPlayingStatus()
 
-    public override init() {
+    public init(appName: String = "Pano Scrobbler") {
+        self.appName = appName
         self.statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         super.init()
         configure()
@@ -91,7 +93,7 @@ public final class StatusItemController: NSObject {
             menu.addItem(.separator())
         }
 
-        let openItem = NSMenuItem(title: "Open Pano Scrobbler", action: #selector(openClicked), keyEquivalent: "o")
+        let openItem = NSMenuItem(title: "Open \(appName)", action: #selector(openClicked), keyEquivalent: "o")
         openItem.target = self
         menu.addItem(openItem)
 
@@ -110,7 +112,7 @@ public final class StatusItemController: NSObject {
 
     private func tooltip(for status: NowPlayingStatus) -> String {
         guard let data = status.data else {
-            return "Pano Scrobbler — No track playing"
+            return "\(appName) — No track playing"
         }
 
         var lines = ["\(data.track)", data.artist]

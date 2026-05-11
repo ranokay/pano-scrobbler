@@ -1,5 +1,5 @@
-import SwiftUI
 import Core
+import SwiftUI
 
 /// Allows the user to manually submit a scrobble to all active services.
 struct ManualScrobbleView: View {
@@ -19,143 +19,87 @@ struct ManualScrobbleView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                header
-                formFields
-                submitSection
-                resultSection
-            }
-            .padding(Spacing.lg)
-        }
-    }
-
-    // MARK: - Header
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            Text("Manual Scrobble")
-                .font(.displayLarge)
-            Text("Manually submit a scrobble to all active services.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-        }
-    }
-
-    // MARK: - Form
-
-    private var formFields: some View {
-        GlassCard(spacing: Spacing.lg) {
-            VStack(alignment: .leading, spacing: Spacing.md) {
-                HStack(spacing: Spacing.lg) {
-                    VStack(alignment: .leading, spacing: Spacing.sm) {
-                        fieldLabel("Artist", required: true)
-                        TextField("Artist name", text: $artist)
-                            .textFieldStyle(.roundedBorder)
-
-                        fieldLabel("Track", required: true)
-                        TextField("Track name", text: $track)
-                            .textFieldStyle(.roundedBorder)
-                    }
-
-                    VStack(alignment: .leading, spacing: Spacing.sm) {
-                        fieldLabel("Album", required: false)
-                        TextField("Album name (optional)", text: $album)
-                            .textFieldStyle(.roundedBorder)
-
-                        fieldLabel("Album Artist", required: false)
-                        TextField("Album artist (optional)", text: $albumArtist)
-                            .textFieldStyle(.roundedBorder)
-                    }
+        VStack(spacing: 0) {
+            Form {
+                Section("Track") {
+                    TextField("Artist", text: $artist, prompt: Text("Required"))
+                    TextField("Track", text: $track, prompt: Text("Required"))
                 }
 
-                Divider()
+                Section("Album") {
+                    TextField("Album", text: $album)
+                    TextField("Album Artist", text: $albumArtist)
+                }
 
-                HStack(spacing: Spacing.md) {
+                Section("Timing") {
                     Toggle("Custom timestamp", isOn: $useCustomTimestamp)
 
                     if useCustomTimestamp {
-                        DatePicker("", selection: $timestamp, displayedComponents: [.date, .hourAndMinute])
-                            .labelsHidden()
+                        DatePicker(
+                            "Timestamp",
+                            selection: $timestamp,
+                            displayedComponents: [.date, .hourAndMinute]
+                        )
                     } else {
-                        Text("Will use current time")
-                            .font(.system(size: 12))
+                        LabeledContent("Timestamp", value: "Current time when submitted")
                             .foregroundStyle(.secondary)
                     }
+                }
 
-                    Spacer()
+                Section {
+                    if let result {
+                        switch result {
+                        case .success:
+                            Label("Scrobble submitted successfully!", systemImage: "checkmark.circle.fill")
+                                .foregroundStyle(.green)
+                        case .error(let message):
+                            Label(message, systemImage: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.red)
+                        }
+                    }
                 }
             }
+            .formStyle(.grouped)
+            .scrollContentBackground(.hidden)
+
+            Divider()
+
+            footer
         }
+        .navigationSubtitle("\(model.accounts.filter(\.enabled).count) active service(s)")
     }
 
-    private func fieldLabel(_ text: String, required: Bool) -> some View {
-        HStack(spacing: 2) {
-            Text(text)
-                .font(.system(size: 11, weight: .semibold))
-                .foregroundStyle(.secondary)
-            if required {
-                Text("*")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundStyle(AccentColors.error)
-            }
-        }
-    }
+    // MARK: - Footer
 
-    // MARK: - Submit
-
-    private var submitSection: some View {
-        HStack(spacing: Spacing.md) {
-            Button {
-                Task { await submitScrobble() }
-            } label: {
-                Label(isSubmitting ? "Submitting…" : "Submit Scrobble", systemImage: "paperplane.fill")
-            }
-            .buttonStyle(.borderedProminent)
-            .disabled(isSubmitting || artist.trimmingCharacters(in: .whitespaces).isEmpty || track.trimmingCharacters(in: .whitespaces).isEmpty)
-
+    private var footer: some View {
+        HStack(spacing: Layout.inlineSpacing) {
             Button {
                 clearForm()
             } label: {
                 Label("Clear", systemImage: "xmark")
             }
-            .buttonStyle(.bordered)
+            .keyboardShortcut(.cancelAction)
 
             Spacer()
 
-            Text("\(model.accounts.filter(\.enabled).count) active service(s)")
-                .font(.system(size: 11))
-                .foregroundStyle(.tertiary)
-        }
-    }
-
-    // MARK: - Result
-
-    @ViewBuilder
-    private var resultSection: some View {
-        if let result {
-            switch result {
-            case .success:
-                HStack(spacing: Spacing.sm) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .foregroundStyle(AccentColors.success)
-                    Text("Scrobble submitted successfully!")
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(AccentColors.success)
+            Button {
+                Task { await submitScrobble() }
+            } label: {
+                if isSubmitting {
+                    ProgressView().controlSize(.small)
+                } else {
+                    Label("Submit Scrobble", systemImage: "paperplane.fill")
                 }
-                .transition(.asymmetric(insertion: .scale.combined(with: .opacity), removal: .opacity))
-
-            case .error(let message):
-                HStack(spacing: Spacing.sm) {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(AccentColors.error)
-                    Text(message)
-                        .font(.system(size: 13))
-                        .foregroundStyle(AccentColors.error)
-                }
-                .transition(.asymmetric(insertion: .scale.combined(with: .opacity), removal: .opacity))
             }
+            .prominentGlassButton()
+            .keyboardShortcut(.defaultAction)
+            .disabled(
+                isSubmitting
+                    || artist.trimmingCharacters(in: .whitespaces).isEmpty
+                    || track.trimmingCharacters(in: .whitespaces).isEmpty
+            )
         }
+        .padding(Layout.windowPadding)
     }
 
     // MARK: - Actions
@@ -181,7 +125,6 @@ struct ManualScrobbleView: View {
 
         isSubmitting = false
 
-        // Auto-clear after success
         Task {
             try? await Task.sleep(nanoseconds: 3_000_000_000)
             withAnimation { result = nil }

@@ -1,6 +1,7 @@
-import SwiftUI
+import AppKit
 import Core
 import ServiceManagement
+import SwiftUI
 
 struct SettingsView: View {
     @ObservedObject var model: AppModel
@@ -10,30 +11,36 @@ struct SettingsView: View {
         Form {
             Section("Scrobbling") {
                 Toggle("Enable scrobbling", isOn: $model.preferences.scrobblerEnabled)
-                Toggle("Submit now playing before scrobbling", isOn: $model.preferences.timing.submitNowPlaying)
+                Toggle("Submit now playing before scrobbling",
+                       isOn: $model.preferences.timing.submitNowPlaying)
             }
 
             Section("Timing") {
                 Stepper(
                     "Scrobble at \(model.preferences.timing.delayPercent)% of track",
                     value: $model.preferences.timing.delayPercent,
-                    in: 10...100, step: 5
+                    in: 10...100,
+                    step: 5
                 )
                 Stepper(
                     "Or after \(model.preferences.timing.delaySeconds) seconds",
                     value: $model.preferences.timing.delaySeconds,
-                    in: 30...600, step: 15
+                    in: 30...600,
+                    step: 15
                 )
                 Stepper(
-                    "Ignore tracks shorter than \(model.preferences.timing.minimumDurationSeconds)s",
+                    "Ignore tracks shorter than \(model.preferences.timing.minimumDurationSeconds) s",
                     value: $model.preferences.timing.minimumDurationSeconds,
-                    in: 10...120, step: 5
+                    in: 10...120,
+                    step: 5
                 )
             }
 
             Section("Notifications") {
-                Toggle("Show notification on scrobble", isOn: $model.preferences.notifyOnScrobble)
-                Toggle("Show notification on now playing", isOn: $model.preferences.notifyOnNowPlaying)
+                Toggle("Show notification on scrobble",
+                       isOn: $model.preferences.notifyOnScrobble)
+                Toggle("Show notification on now playing",
+                       isOn: $model.preferences.notifyOnNowPlaying)
             }
 
             Section("Discord Rich Presence") {
@@ -45,18 +52,17 @@ struct SettingsView: View {
 
                 if !model.discordAvailable {
                     Text("Discord Rich Presence is disabled because this build does not include a Discord client ID.")
-                        .font(.caption)
+                        .font(.callout)
                         .foregroundStyle(.secondary)
                 }
 
                 if model.discordEnabled {
                     LabeledContent("Status") {
-                        HStack(spacing: 4) {
+                        HStack(spacing: 6) {
                             Circle()
                                 .fill(model.discordConnected ? Color.green : Color.orange)
                                 .frame(width: 8, height: 8)
                             Text(model.discordConnected ? "Connected" : "Disconnected")
-                                .font(.system(size: 12))
                                 .foregroundStyle(.secondary)
                         }
                     }
@@ -81,99 +87,108 @@ struct SettingsView: View {
             Section("Storage") {
                 LabeledContent("Data directory") {
                     Button {
-                        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: model.paths.rootDirectory.path)
+                        NSWorkspace.shared.selectFile(
+                            nil,
+                            inFileViewerRootedAtPath: model.paths.rootDirectory.path
+                        )
                     } label: {
                         HStack(spacing: 4) {
                             Text(model.paths.rootDirectory.path)
-                                .font(.system(size: 12, design: .monospaced))
+                                .font(.callout)
                                 .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
                             Image(systemName: "folder")
-                                .font(.system(size: 11))
                                 .foregroundStyle(.secondary)
                         }
                     }
-                    .buttonStyle(.borderless)
+                    .buttonStyle(.link)
                 }
+
                 LabeledContent("SQLite database") {
                     Text(model.paths.databaseURL.path)
                         .textSelection(.enabled)
                         .foregroundStyle(.secondary)
-                        .font(.system(size: 12, design: .monospaced))
+                        .font(.callout.monospaced())
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
             }
 
             Section("Data") {
-                HStack(spacing: Spacing.md) {
+                HStack {
                     Button {
                         model.importBundle()
                     } label: {
-                        Label("Import Settings", systemImage: "square.and.arrow.down")
+                        Label("Import Settings…", systemImage: "square.and.arrow.down")
                     }
 
                     Button {
                         model.exportBundle()
                     } label: {
-                        Label("Export Settings", systemImage: "square.and.arrow.up")
+                        Label("Export Settings…", systemImage: "square.and.arrow.up")
                     }
                 }
             }
 
             Section("Support") {
-                Button {
-                    copyBugReport()
-                } label: {
-                    Label("Copy Bug Report Info", systemImage: "ant.fill")
-                }
-
-                Button {
-                    if let url = URL(string: "https://github.com/kawaiiDango/pano-scrobbler") {
-                        NSWorkspace.shared.open(url)
+                HStack {
+                    Button {
+                        copyBugReport()
+                    } label: {
+                        Label("Copy Bug Report Info", systemImage: "ant")
                     }
-                } label: {
-                    Label("GitHub Repository", systemImage: "link")
+
+                    Button {
+                        if let url = URL(string: "https://github.com/kawaiiDango/pano-scrobbler") {
+                            NSWorkspace.shared.open(url)
+                        }
+                    } label: {
+                        Label("GitHub Repository", systemImage: "link")
+                    }
                 }
             }
 
             Section("About") {
                 LabeledContent("Version") {
-                    Text(appVersion)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                    metadataText(appVersion)
                 }
                 LabeledContent("Build") {
-                    Text(appBuild)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                    metadataText(appBuild)
                 }
                 LabeledContent("macOS") {
-                    Text(ProcessInfo.processInfo.operatingSystemVersionString)
-                        .font(.system(size: 12, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                    metadataText(ProcessInfo.processInfo.operatingSystemVersionString)
                 }
-                LabeledContent("Accounts") {
-                    Text("\(model.accounts.filter(\.enabled).count) active")
-                        .font(.system(size: 12))
+                LabeledContent("Active accounts") {
+                    Text("\(model.accounts.filter(\.enabled).count)")
                         .foregroundStyle(.secondary)
+                        .monospacedDigit()
                 }
             }
 
             Section {
-                HStack {
-                    Spacer()
-                    Button("Reset to Defaults") {
-                        Task { await model.resetPreferences() }
-                    }
-                    Spacer()
+                Button("Reset to Defaults", role: .destructive) {
+                    Task { await model.resetPreferences() }
                 }
             }
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
         .onChange(of: model.preferences) {
             Task { await model.savePreferences() }
         }
     }
 
     // MARK: - Helpers
+
+    private func metadataText(_ text: String) -> some View {
+        Text(text)
+            .font(.callout.monospaced())
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .textSelection(.enabled)
+    }
 
     private var appVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"
@@ -193,7 +208,7 @@ struct SettingsView: View {
         Scrobbling: \(model.preferences.scrobblerEnabled ? "Enabled" : "Disabled")
         Discord RPC: \(model.discordAvailable ? (model.discordEnabled ? (model.discordConnected ? "Connected" : "Enabled, not connected") : "Disabled") : "Not configured")
         Pending: \(model.pendingCount)
-        
+
         Recent Logs:
         \(model.logs.prefix(30).joined(separator: "\n"))
         """

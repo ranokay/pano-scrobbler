@@ -1,88 +1,257 @@
 import Core
+import Services
 import SwiftUI
 
-// MARK: - Spacing
+// MARK: - Layout
 
-enum Spacing {
-    static let xs: CGFloat = 4
-    static let sm: CGFloat = 8
-    static let md: CGFloat = 16
-    static let lg: CGFloat = 24
-    static let xl: CGFloat = 32
-    static let xxl: CGFloat = 48
+/// Minimal layout constants. Most spacing should come from container defaults
+/// (Form, List, GroupBox, Section) — only use these where SwiftUI does not
+/// already provide native spacing.
+enum Layout {
+    /// Window-edge padding for plain ScrollView content. Matches macOS HIG.
+    static let windowPadding: CGFloat = 20
+    /// Vertical gap between major sections inside a ScrollView.
+    static let sectionSpacing: CGFloat = 16
+    /// Inline gap inside a card / row.
+    static let inlineSpacing: CGFloat = 8
+    /// Corner radius for hero / surface treatments.
+    static let cornerRadius: CGFloat = 12
 }
 
-// MARK: - Accent Colors
+// MARK: - Service Colors
 
-enum AccentColors {
-    static let primary = Color(hue: 0.73, saturation: 0.65, brightness: 0.95)      // Indigo
-    static let secondary = Color(hue: 0.78, saturation: 0.55, brightness: 0.90)    // Purple
-    static let gradient = LinearGradient(
-        colors: [primary, secondary],
-        startPoint: .topLeading,
-        endPoint: .bottomTrailing
-    )
-
-    static let success = Color(hue: 0.38, saturation: 0.70, brightness: 0.75)      // Green
-    static let warning = Color(hue: 0.10, saturation: 0.75, brightness: 0.95)      // Amber
-    static let error = Color(hue: 0.0, saturation: 0.70, brightness: 0.85)         // Red
-
-    static let lastFM = Color(hue: 0.0, saturation: 0.75, brightness: 0.85)        // Red
-    static let listenBrainz = Color(hue: 0.08, saturation: 0.80, brightness: 0.95) // Orange
-    static let file = Color(hue: 0.58, saturation: 0.60, brightness: 0.85)         // Teal
-    static let pleroma = Color(hue: 0.73, saturation: 0.50, brightness: 0.80)      // Indigo
-
-    static func serviceColor(for type: Core.AccountType) -> Color {
+/// Tinted accents for distinguishing services. Mapped to system-named colors
+/// so they remain legible against any window material in light/dark mode.
+enum ServiceTint {
+    static func color(for type: Core.AccountType) -> Color {
         switch type {
-        case .lastFM, .libreFM, .gnuFM: lastFM
-        case .listenBrainz, .customListenBrainz: listenBrainz
-        case .pleroma: pleroma
-        case .file: file
+        case .lastFM, .libreFM, .gnuFM: .red
+        case .listenBrainz, .customListenBrainz: .orange
+        case .pleroma: .indigo
+        case .file: .teal
         }
     }
 }
 
-// MARK: - Typography
+// MARK: - Adaptive Glass Surfaces
 
-extension Font {
-    static let displayLarge = Font.system(size: 22, weight: .bold, design: .rounded)
-    static let displaySmall = Font.system(size: 17, weight: .semibold, design: .rounded)
-    static let metricValue = Font.system(size: 20, weight: .bold, design: .rounded)
-    static let metricLabel = Font.system(size: 11, weight: .medium, design: .rounded)
-    static let logEntry = Font.system(size: 12, weight: .regular, design: .monospaced)
-}
-
-// MARK: - Glass Card
-
-struct GlassCard<Content: View>: View {
-    var spacing: CGFloat = Spacing.md
+/// Container that opts in to `GlassEffectContainer` on macOS 26+ for
+/// merged glass blending. Passes through on classic.
+struct AdaptiveGlassContainer<Content: View>: View {
+    var spacing: CGFloat = Layout.sectionSpacing
     @ViewBuilder var content: () -> Content
 
     @ViewBuilder
     var body: some View {
-        let base = content()
-            .padding(spacing)
-            .frame(maxWidth: .infinity, alignment: .leading)
-
         if #available(macOS 26.0, *) {
-            base.glassEffect(.regular, in: .rect(cornerRadius: 10))
+            GlassEffectContainer(spacing: spacing) {
+                content()
+            }
         } else {
-            base
-                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            content()
+        }
+    }
+}
+
+extension View {
+    /// Wraps the receiver in a glass-aware container on macOS 26.
+    @ViewBuilder
+    func adaptiveGlassContainer(spacing: CGFloat = Layout.sectionSpacing) -> some View {
+        AdaptiveGlassContainer(spacing: spacing) { self }
+    }
+
+    /// Window-level background. On macOS 26 this lights up the full Liquid
+    /// Glass window chrome; on macOS 15 it leaves the default vibrancy intact.
+    @ViewBuilder
+    func adaptiveWindowBackground() -> some View {
+        if #available(macOS 26.0, *) {
+            self.containerBackground(.thinMaterial, for: .window)
+        } else {
+            self
+        }
+    }
+
+    /// Hero surface treatment for prominent cards (Now Playing, MusicEntryInfo
+    /// header, Onboarding panels, Random result). On macOS 26 uses interactive
+    /// glass; on macOS 15 uses a subtle material with a quaternary stroke.
+    @ViewBuilder
+    func heroGlass(cornerRadius: CGFloat = Layout.cornerRadius) -> some View {
+        if #available(macOS 26.0, *) {
+            self
+                .padding(Layout.sectionSpacing)
+                .glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
+        } else {
+            self
+                .padding(Layout.sectionSpacing)
+                .background(.background.tertiary, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
                 .overlay {
-                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                         .strokeBorder(.quaternary, lineWidth: 1)
                 }
+        }
+    }
+
+    /// Glass treatment for interactive surfaces that aren't a button (e.g.
+    /// a custom search field or pill container).
+    @ViewBuilder
+    func interactiveGlass(cornerRadius: CGFloat = 8) -> some View {
+        if #available(macOS 26.0, *) {
+            self.glassEffect(.regular.interactive(), in: .rect(cornerRadius: cornerRadius))
+        } else {
+            self
+                .background(.background.secondary, in: RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+                .overlay {
+                    RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                        .strokeBorder(.quaternary, lineWidth: 1)
+                }
+        }
+    }
+
+    /// Prefer this for primary buttons. On macOS 26 uses `glassProminent`;
+    /// on macOS 15 falls back to `.borderedProminent`.
+    @ViewBuilder
+    func prominentGlassButton() -> some View {
+        if #available(macOS 26.0, *) {
+            self.buttonStyle(.glassProminent)
+        } else {
+            self.buttonStyle(.borderedProminent)
+        }
+    }
+
+    /// For secondary buttons. macOS 26 → `.glass`; macOS 15 → `.bordered`.
+    @ViewBuilder
+    func standardGlassButton() -> some View {
+        if #available(macOS 26.0, *) {
+            self.buttonStyle(.glass)
+        } else {
+            self.buttonStyle(.bordered)
+        }
+    }
+}
+
+// MARK: - Artwork Cache Environment
+
+private struct ArtworkCacheKey: EnvironmentKey {
+    static let defaultValue: ArtworkCache = ArtworkCache()
+}
+
+extension EnvironmentValues {
+    var artworkCache: ArtworkCache {
+        get { self[ArtworkCacheKey.self] }
+        set { self[ArtworkCacheKey.self] = newValue }
+    }
+}
+
+extension View {
+    func artworkCache(_ cache: ArtworkCache) -> some View {
+        environment(\.artworkCache, cache)
+    }
+}
+
+// MARK: - AsyncArtwork
+
+/// Resolves artwork via `ArtworkCache` and displays it with a graceful
+/// placeholder. Use this for artist / album / track artwork everywhere the
+/// raw Last.fm `imageURL` would otherwise be a deprecated placeholder.
+struct AsyncArtwork: View {
+    var subject: ArtworkCache.Subject
+    var hint: URL?
+    var placeholderSymbol: String
+    var cornerRadius: CGFloat = 6
+
+    @Environment(\.artworkCache) private var cache
+    @State private var resolved: URL?
+    @State private var didAttempt = false
+
+    var body: some View {
+        Group {
+            if let url = resolved {
+                AsyncImage(url: url) { phase in
+                    switch phase {
+                    case .success(let image):
+                        image.resizable().aspectRatio(contentMode: .fill)
+                    case .failure:
+                        placeholder
+                    case .empty:
+                        placeholder
+                    @unknown default:
+                        placeholder
+                    }
+                }
+            } else {
+                placeholder
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: cornerRadius, style: .continuous))
+        .task(id: taskID) {
+            guard !didAttempt else { return }
+            didAttempt = true
+            let url = await cache.resolve(subject, hint: hint)
+            await MainActor.run { self.resolved = url }
+        }
+    }
+
+    private var taskID: String {
+        "\(subject)|\(hint?.absoluteString ?? "")"
+    }
+
+    private var placeholder: some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(.background.tertiary)
+            .overlay {
+                Image(systemName: placeholderSymbol)
+                    .foregroundStyle(.tertiary)
+            }
+    }
+}
+
+// MARK: - CollapsibleGroupBox
+
+/// A GroupBox-styled container with a clickable header that toggles disclosure.
+/// Unlike `DisclosureGroup`, the entire title row is a hit target, not just
+/// the chevron.
+struct CollapsibleGroupBox<Label: View, Content: View>: View {
+    @Binding var isExpanded: Bool
+    @ViewBuilder var label: () -> Label
+    @ViewBuilder var content: () -> Content
+
+    var body: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 0) {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) {
+                        isExpanded.toggle()
+                    }
+                } label: {
+                    HStack(spacing: Layout.inlineSpacing) {
+                        label()
+                        Spacer()
+                        Image(systemName: "chevron.right")
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+
+                if isExpanded {
+                    content()
+                        .padding(.top, Layout.inlineSpacing)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
         }
     }
 }
 
 // MARK: - Animated Equalizer
 
+/// Three-bar VU indicator used in the Now Playing hero.
 struct AnimatedEqualizer: View {
     var isPlaying: Bool
     var barCount: Int = 3
-    var color: Color = AccentColors.primary
+    var color: Color = .accentColor
 
     @State private var phases: [CGFloat] = []
 
@@ -118,6 +287,7 @@ struct AnimatedEqualizer: View {
 
 // MARK: - Pulsing Dot
 
+/// Small status indicator with an optional pulse animation.
 struct PulsingDot: View {
     var color: Color
     var size: CGFloat = 8
@@ -144,34 +314,15 @@ struct PulsingDot: View {
     }
 }
 
-// MARK: - Status Badge
-
-struct StatusBadge: View {
-    var count: Int
-    var color: Color = AccentColors.primary
-
-    var body: some View {
-        if count > 0 {
-            Text("\(count)")
-                .font(.system(size: 10, weight: .bold, design: .rounded))
-                .foregroundStyle(.white)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(color, in: Capsule())
-                .contentTransition(.numericText())
-                .transition(.scale.combined(with: .opacity))
-        }
-    }
-}
-
 // MARK: - Playback State Helpers
 
 extension PlaybackState {
-    var dotColor: Color {
+    /// Semantic system color for the indicator.
+    var indicatorColor: Color {
         switch self {
-        case .playing: AccentColors.success
-        case .paused: AccentColors.warning
-        case .stopped: AccentColors.error
+        case .playing: .green
+        case .paused: .orange
+        case .stopped: .red
         case .none, .waiting: .secondary
         }
     }
@@ -184,6 +335,64 @@ extension PlaybackState {
         case .none: "Idle"
         case .waiting: "Waiting"
         }
+    }
+}
+
+// MARK: - Flow Layout
+
+/// A simple flow layout that wraps children onto new lines.
+struct FlowLayout: SwiftUI.Layout {
+    var spacing: CGFloat = 8
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) -> CGSize {
+        computeLayout(proposal: proposal, subviews: subviews).size
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout Void) {
+        let result = computeLayout(
+            proposal: ProposedViewSize(width: bounds.width, height: bounds.height),
+            subviews: subviews
+        )
+        for (index, position) in result.positions.enumerated() {
+            subviews[index].place(
+                at: CGPoint(x: bounds.minX + position.x, y: bounds.minY + position.y),
+                proposal: ProposedViewSize.unspecified
+            )
+        }
+    }
+
+    private struct FlowLayoutResult {
+        var size: CGSize
+        var positions: [CGPoint]
+    }
+
+    private func computeLayout(proposal: ProposedViewSize, subviews: Subviews) -> FlowLayoutResult {
+        let maxWidth = proposal.width ?? .infinity
+        var positions: [CGPoint] = []
+        var currentX: CGFloat = 0
+        var currentY: CGFloat = 0
+        var lineHeight: CGFloat = 0
+        var totalHeight: CGFloat = 0
+
+        for subview in subviews {
+            let size = subview.sizeThatFits(ProposedViewSize.unspecified)
+
+            if currentX + size.width > maxWidth, currentX > 0 {
+                currentX = 0
+                currentY += lineHeight + spacing
+                lineHeight = 0
+            }
+
+            positions.append(CGPoint(x: currentX, y: currentY))
+            currentX += size.width + spacing
+            lineHeight = max(lineHeight, size.height)
+            totalHeight = currentY + lineHeight
+        }
+
+        return FlowLayoutResult(
+            size: CGSize(width: maxWidth, height: totalHeight),
+            positions: positions
+        )
     }
 }
 

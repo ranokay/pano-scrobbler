@@ -45,7 +45,13 @@ final class AppModel: ObservableObject {
     @Published var discordConnected = false
     var discordAvailable: Bool { AppConfiguration.discordClientID != nil }
 
+    // Remote now-playing (from Last.fm / ListenBrainz user accounts)
+    @Published var remoteNowPlaying: [RemoteNowPlayingEntry] = []
+    @Published var isRefreshingRemoteNowPlaying = false
+
     let paths: AppPaths
+    /// Shared artwork resolver — lazy iTunes/Deezer fallback for artist & track artwork.
+    let artworkCache = ArtworkCache()
 
     private let accountStore: JSONAccountStore
     private let preferencesStore: JSONPreferencesStore
@@ -53,7 +59,7 @@ final class AppModel: ObservableObject {
     private let secretStore: KeychainSecretStore
     private let pendingStore: any PendingScrobbleStore
     private let notifications = MacNotificationPresenter()
-    private let statusItem = StatusItemController()
+    private let statusItem = StatusItemController(appName: AppConfiguration.displayName)
     private let engine: ScrobbleEngine
     private let nowPlayingProvider = AppleScriptNowPlayingProvider()
     private var engineTask: Task<Void, Never>?
@@ -61,7 +67,7 @@ final class AppModel: ObservableObject {
     private var retryTask: Task<Void, Never>?
     private lazy var discordRPC: DiscordRichPresence? = {
         guard let clientID = AppConfiguration.discordClientID else { return nil }
-        return DiscordRichPresence(clientId: clientID)
+        return DiscordRichPresence(clientId: clientID, appName: AppConfiguration.displayName)
     }()
 
     init() {
@@ -69,7 +75,7 @@ final class AppModel: ObservableObject {
         self.accountStore = JSONAccountStore(fileURL: paths.accountsURL)
         self.preferencesStore = JSONPreferencesStore(fileURL: paths.preferencesURL)
         self.rulesStore = JSONMetadataRulesStore(fileURL: paths.rulesURL)
-        self.secretStore = KeychainSecretStore()
+        self.secretStore = KeychainSecretStore(service: AppConfiguration.keychainService)
 
         do {
             self.pendingStore = try SQLitePersistenceStore(fileURL: paths.databaseURL)
@@ -84,13 +90,17 @@ final class AppModel: ObservableObject {
 
         statusItem.onOpen = {
             NSApp.activate(ignoringOtherApps: true)
-            for window in NSApp.windows {
+            for window in NSApp.windows where window.canBecomeKey {
                 window.makeKeyAndOrderFront(nil)
             }
         }
-        statusItem.onSettings = {
+        statusItem.onSettings = { [weak self] in
+            guard let self else { return }
             NSApp.activate(ignoringOtherApps: true)
-            NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
+            self.selectedSection = .settings
+            for window in NSApp.windows where window.canBecomeKey {
+                window.makeKeyAndOrderFront(nil)
+            }
         }
         statusItem.onQuit = {
             NSApp.terminate(nil)
@@ -570,8 +580,88 @@ final class AppModel: ObservableObject {
 
     var lastFMService: LastFMService? {
         guard let account = accounts.first(where: { $0.type == .lastFM }) else { return nil }
-        guard let creds = try? KeychainSecretStore().loadCredentialsSync(reference: account.credentialReference) else { return nil }
+        guard let creds = try? secretStore.loadCredentialsSync(reference: account.credentialReference) else { return nil }
         return try? LastFMService(account: account, credentials: creds)
+    }
+
+    var listenBrainzService: ListenBrainzService? {
+        guard let account = accounts.first(where: {
+            $0.type == .listenBrainz || $0.type == .customListenBrainz
+        }) else { return nil }
+        guard let creds = try? secretStore.loadCredentialsSync(reference: account.credentialReference) else { return nil }
+        return try? ListenBrainzService(account: account, credentials: creds)
+    }
+
+    // MARK: - Remote Now Playing
+
+    private var remoteNowPlayingPollTask: Task<Void, Never>?
+
+    /// Starts polling for remote now-playing entries (every 30s).
+    /// Safe to call multiple times — second call is a no-op.
+    func startRemoteNowPlayingPolling() {
+        guard remoteNowPlayingPollTask == nil else { return }
+        remoteNowPlayingPollTask = Task { [weak self] in
+            await self?.refreshRemoteNowPlaying()
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 30_000_000_000)
+                guard !Task.isCancelled else { return }
+                await self?.refreshRemoteNowPlaying()
+            }
+        }
+    }
+
+    func stopRemoteNowPlayingPolling() {
+        remoteNowPlayingPollTask?.cancel()
+        remoteNowPlayingPollTask = nil
+    }
+
+    /// One-shot refresh of remote now-playing entries from all services.
+    func refreshRemoteNowPlaying() async {
+        isRefreshingRemoteNowPlaying = true
+        defer { isRefreshingRemoteNowPlaying = false }
+
+        var entries: [RemoteNowPlayingEntry] = []
+
+        // Last.fm: nowplaying lives at the head of getRecentTracks.
+        if let service = lastFMService {
+            do {
+                let result = try await service.getRecents(limit: 1)
+                if let track = result.entries.first(where: { $0.isNowPlaying }) {
+                    entries.append(RemoteNowPlayingEntry(
+                        source: .lastFM,
+                        username: service.account.username,
+                        artist: track.artist.name,
+                        track: track.name,
+                        album: track.album?.name,
+                        artworkURL: track.imageURL?.isLastFMPlaceholder == true ? nil : track.imageURL,
+                        since: track.timestamp
+                    ))
+                }
+            } catch {
+                appendLog("Last.fm nowplaying refresh failed: \(error.localizedDescription)")
+            }
+        }
+
+        // ListenBrainz: dedicated /playing-now endpoint.
+        if let service = listenBrainzService {
+            do {
+                if let listen = try await service.getPlayingNow() {
+                    entries.append(RemoteNowPlayingEntry(
+                        source: .listenBrainz,
+                        username: service.account.username,
+                        artist: listen.track_metadata.artist_name,
+                        track: listen.track_metadata.track_name,
+                        album: listen.track_metadata.release_name,
+                        artworkURL: nil,
+                        since: listen.listened_at.flatMap { Date(timeIntervalSince1970: TimeInterval($0)) }
+                    ))
+                }
+            } catch {
+                appendLog("ListenBrainz nowplaying refresh failed: \(error.localizedDescription)")
+            }
+        }
+
+        remoteNowPlaying = entries
     }
 
     func toggleLove(artist: String, track: String, loved: Bool) async {
@@ -777,13 +867,5 @@ enum AppSection: String, CaseIterable, Identifiable {
         case .settings: "gearshape"
         case .logs: "doc.text.magnifyingglass"
         }
-    }
-}
-
-private enum AppConfiguration {
-    static var discordClientID: String? {
-        (Bundle.main.object(forInfoDictionaryKey: "DiscordClientID") as? String)?
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-            .nilIfEmpty
     }
 }

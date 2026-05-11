@@ -1,9 +1,9 @@
-import SwiftUI
+import AppKit
 import Core
 import Services
-import AppKit
+import SwiftUI
 
-/// Generates an NxN artwork collage from top charts — analogous to Kotlin CollageGeneratorVM.
+/// Generates an NxN artwork collage from top charts.
 struct CollageView: View {
     @ObservedObject var model: AppModel
     @State private var gridSize = 3
@@ -31,93 +31,92 @@ struct CollageView: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                header
-                controls
+            VStack(alignment: .leading, spacing: Layout.sectionSpacing) {
+                controlsCard
+                actionsRow
                 previewSection
             }
-            .padding(Spacing.lg)
-        }
-    }
-
-    // MARK: - Header
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            Text("Collage Generator")
-                .font(.displayLarge)
-            Text("Create artwork collages from your top charts.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            .padding(Layout.windowPadding)
+            .frame(maxWidth: 900, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
 
     // MARK: - Controls
 
-    private var controls: some View {
-        VStack(spacing: Spacing.md) {
-            HStack(spacing: Spacing.md) {
-                // Type
-                Picker("Type", selection: $chartType) {
-                    ForEach(ChartType.allCases, id: \.self) { type in
-                        Label(type.rawValue, systemImage: type.icon).tag(type)
+    private var controlsCard: some View {
+        GroupBox("Options") {
+            Grid(alignment: .leading, horizontalSpacing: Layout.sectionSpacing, verticalSpacing: 10) {
+                GridRow {
+                    Text("Type").foregroundStyle(.secondary)
+                    Picker("Type", selection: $chartType) {
+                        ForEach(ChartType.allCases, id: \.self) { type in
+                            Label(type.rawValue, systemImage: type.icon).tag(type)
+                        }
                     }
+                    .labelsHidden()
                 }
-                .frame(width: 140)
-
-                // Period
-                Picker("Period", selection: $period) {
-                    ForEach(LastFMPeriod.allCases, id: \.self) { p in
-                        Text(p.displayName).tag(p)
+                GridRow {
+                    Text("Period").foregroundStyle(.secondary)
+                    Picker("Period", selection: $period) {
+                        ForEach(LastFMPeriod.allCases, id: \.self) { p in
+                            Text(p.displayName).tag(p)
+                        }
                     }
+                    .labelsHidden()
                 }
-                .frame(width: 140)
-
-                // Grid size
-                Picker("Grid", selection: $gridSize) {
-                    Text("3×3").tag(3)
-                    Text("4×4").tag(4)
-                    Text("5×5").tag(5)
+                GridRow {
+                    Text("Grid").foregroundStyle(.secondary)
+                    Picker("Grid", selection: $gridSize) {
+                        Text("3 × 3").tag(3)
+                        Text("4 × 4").tag(4)
+                        Text("5 × 5").tag(5)
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .frame(maxWidth: 280)
                 }
-                .frame(width: 100)
-
-                Toggle("Captions", isOn: $showCaptions)
+                GridRow {
+                    Text("Captions").foregroundStyle(.secondary)
+                    Toggle("Show captions", isOn: $showCaptions)
+                        .labelsHidden()
+                }
             }
+            .padding(.vertical, 4)
+        }
+    }
 
-            HStack(spacing: Spacing.md) {
+    private var actionsRow: some View {
+        HStack(spacing: Layout.inlineSpacing) {
+            Button {
+                Task { await generateCollage() }
+            } label: {
+                Label("Generate", systemImage: "paintbrush.fill")
+            }
+            .prominentGlassButton()
+            .disabled(isGenerating)
+
+            if generatedImage != nil {
                 Button {
-                    Task { await generateCollage() }
+                    saveCollage()
                 } label: {
-                    Label("Generate", systemImage: "paintbrush.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(isGenerating)
-
-                if generatedImage != nil {
-                    Button {
-                        saveCollage()
-                    } label: {
-                        Label("Save", systemImage: "square.and.arrow.down")
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button {
-                        shareCollage()
-                    } label: {
-                        Label("Share", systemImage: "square.and.arrow.up")
-                    }
-                    .buttonStyle(.bordered)
-
-                    Button {
-                        copyCollage()
-                    } label: {
-                        Label("Copy", systemImage: "doc.on.doc")
-                    }
-                    .buttonStyle(.bordered)
+                    Label("Save…", systemImage: "square.and.arrow.down")
                 }
 
-                Spacer()
+                Button {
+                    shareCollage()
+                } label: {
+                    Label("Share", systemImage: "square.and.arrow.up")
+                }
+
+                Button {
+                    copyCollage()
+                } label: {
+                    Label("Copy", systemImage: "doc.on.doc")
+                }
             }
+
+            Spacer()
         }
     }
 
@@ -126,7 +125,7 @@ struct CollageView: View {
     @ViewBuilder
     private var previewSection: some View {
         if isGenerating {
-            VStack(spacing: Spacing.md) {
+            VStack(spacing: Layout.sectionSpacing) {
                 ProgressView(value: progress)
                     .progressViewStyle(.linear)
                 Text("Generating collage…")
@@ -134,40 +133,35 @@ struct CollageView: View {
                     .foregroundStyle(.secondary)
             }
             .frame(maxWidth: .infinity)
-            .padding(.vertical, Spacing.xl)
+            .padding(.vertical, 40)
         } else if let error {
             ContentUnavailableView(
                 "Generation Failed",
                 systemImage: "exclamationmark.triangle",
                 description: Text(error)
             )
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, Spacing.xl)
+            .padding(.vertical, 40)
         } else if let image = generatedImage {
-            VStack(spacing: Spacing.sm) {
+            VStack(spacing: Layout.inlineSpacing) {
                 Image(nsImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(maxWidth: 600, maxHeight: 600)
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
+                    .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
                     .shadow(color: .black.opacity(0.2), radius: 10, y: 4)
 
-                Text("\(gridSize)×\(gridSize) \(chartType.rawValue) • \(period.displayName)")
-                    .font(.system(size: 11))
+                Text("\(gridSize) × \(gridSize) \(chartType.rawValue) • \(period.displayName)")
+                    .font(.caption)
                     .foregroundStyle(.tertiary)
-            }
-        } else {
-            VStack(spacing: Spacing.md) {
-                Spacer(minLength: 60)
-                Image(systemName: "photo.artframe")
-                    .font(.system(size: 48))
-                    .foregroundStyle(.quaternary)
-                Text("Configure options and press Generate")
-                    .font(.subheadline)
-                    .foregroundStyle(.tertiary)
-                Spacer(minLength: 60)
             }
             .frame(maxWidth: .infinity)
+        } else {
+            ContentUnavailableView(
+                "No Collage",
+                systemImage: "photo.artframe",
+                description: Text("Configure options and press Generate.")
+            )
+            .padding(.vertical, 40)
         }
     }
 
@@ -187,7 +181,6 @@ struct CollageView: View {
         do {
             let limit = gridSize * gridSize
 
-            // Fetch chart entries
             let artworkURLs: [(url: URL?, name: String, subtitle: String?)]
             switch chartType {
             case .artists:
@@ -203,7 +196,6 @@ struct CollageView: View {
 
             progress = 0.2
 
-            // Download artwork images
             let cellSize = 300
             let totalSize = cellSize * gridSize
             var images: [(NSImage, String, String?)] = []
@@ -216,7 +208,6 @@ struct CollageView: View {
                 }
 
                 if img == nil {
-                    // Create placeholder
                     img = createPlaceholder(size: cellSize, type: chartType)
                 }
 
@@ -224,35 +215,27 @@ struct CollageView: View {
                 progress = 0.2 + 0.6 * Double(index + 1) / Double(min(limit, artworkURLs.count))
             }
 
-            // Draw collage with CoreGraphics
             let nsImage = NSImage(size: NSSize(width: totalSize, height: totalSize))
             nsImage.lockFocus()
 
-            guard let context = NSGraphicsContext.current?.cgContext else {
-                nsImage.unlockFocus()
-                error = "Could not create graphics context."
-                isGenerating = false
-                return
-            }
-
-            // Flip coordinate system
-            context.translateBy(x: 0, y: CGFloat(totalSize))
-            context.scaleBy(x: 1, y: -1)
+            // AppKit's lockFocus context uses a y-up coordinate system. We
+            // want row 0 to render at the top, so we invert the y origin
+            // when computing each cell's rect — no manual CG transform
+            // needed. This also lets NSAttributedString.draw render captions
+            // right-side-up.
 
             for (index, (image, name, subtitle)) in images.enumerated() {
                 let col = index % gridSize
                 let row = index / gridSize
                 let x = CGFloat(col * cellSize)
-                let y = CGFloat(row * cellSize)
+                // Place row 0 at the top: y origin counts from the bottom of
+                // the canvas, so the top-left cell is at y = totalSize - cellSize.
+                let y = CGFloat(totalSize - (row + 1) * cellSize)
                 let rect = CGRect(x: x, y: y, width: CGFloat(cellSize), height: CGFloat(cellSize))
 
-                // Draw image
-                if let cgImage = image.cgImage(forProposedRect: nil, context: nil, hints: nil) {
-                    context.draw(cgImage, in: rect)
-                }
+                image.draw(in: rect, from: .zero, operation: .copy, fraction: 1.0)
 
-                // Draw captions
-                if showCaptions {
+                if showCaptions, let context = NSGraphicsContext.current?.cgContext {
                     drawCaption(context: context, name: name, subtitle: subtitle, rect: rect, cellSize: cellSize)
                 }
             }
@@ -264,7 +247,6 @@ struct CollageView: View {
                 generatedImage = nsImage
             }
             isGenerating = false
-
         } catch {
             self.error = error.localizedDescription
             isGenerating = false
@@ -272,28 +254,45 @@ struct CollageView: View {
     }
 
     private func drawCaption(context: CGContext, name: String, subtitle: String?, rect: CGRect, cellSize: Int) {
+        // y-up AppKit coordinates: rect.minY is the BOTTOM of the cell.
         let padding: CGFloat = 12
-        let bottomY = rect.maxY - padding
 
-        // Draw semi-transparent gradient background
-        let gradientRect = CGRect(x: rect.minX, y: rect.maxY - CGFloat(cellSize) * 0.4, width: rect.width, height: CGFloat(cellSize) * 0.4)
-        let colors = [CGColor(gray: 0, alpha: 0), CGColor(gray: 0, alpha: 0.7)]
-        if let gradient = CGGradient(colorsSpace: CGColorSpaceCreateDeviceRGB(), colors: colors as CFArray, locations: [0, 1]) {
+        // Gradient: opaque-black at the bottom fading to transparent ~40% up.
+        let gradientHeight = CGFloat(cellSize) * 0.4
+        let gradientRect = CGRect(
+            x: rect.minX,
+            y: rect.minY,
+            width: rect.width,
+            height: gradientHeight
+        )
+        let colors = [CGColor(gray: 0, alpha: 0.85), CGColor(gray: 0, alpha: 0)]
+        if let gradient = CGGradient(
+            colorsSpace: CGColorSpaceCreateDeviceRGB(),
+            colors: colors as CFArray,
+            locations: [0, 1]
+        ) {
             context.saveGState()
             context.clip(to: gradientRect)
-            context.drawLinearGradient(gradient, start: CGPoint(x: gradientRect.midX, y: gradientRect.minY), end: CGPoint(x: gradientRect.midX, y: gradientRect.maxY), options: [])
+            context.drawLinearGradient(
+                gradient,
+                start: CGPoint(x: gradientRect.midX, y: gradientRect.minY),  // opaque at bottom
+                end: CGPoint(x: gradientRect.midX, y: gradientRect.maxY),    // fades up
+                options: []
+            )
             context.restoreGState()
         }
 
-        // Draw text
+        // Text: name on top of subtitle, both anchored just above the bottom.
         let nameFont = NSFont.boldSystemFont(ofSize: 14)
         let subtitleFont = NSFont.systemFont(ofSize: 12)
         let shadow = NSShadow()
         shadow.shadowColor = NSColor.black.withAlphaComponent(0.8)
         shadow.shadowBlurRadius = 3
-        shadow.shadowOffset = NSSize(width: 0, height: -1)
+        shadow.shadowOffset = NSSize(width: 0, height: 1)
 
-        var textY = bottomY
+        // In y-up coords, the baseline goes up: subtitle first (y = bottom + padding),
+        // then name above it.
+        var textY = rect.minY + padding
 
         if let subtitle {
             let subtitleAttrs: [NSAttributedString.Key: Any] = [
@@ -303,8 +302,8 @@ struct CollageView: View {
             ]
             let subtitleStr = NSAttributedString(string: subtitle, attributes: subtitleAttrs)
             let subtitleSize = subtitleStr.size()
-            textY -= subtitleSize.height
             subtitleStr.draw(at: NSPoint(x: rect.minX + padding, y: textY))
+            textY += subtitleSize.height + 2
         }
 
         let nameAttrs: [NSAttributedString.Key: Any] = [
@@ -313,8 +312,6 @@ struct CollageView: View {
             .shadow: shadow
         ]
         let nameStr = NSAttributedString(string: name, attributes: nameAttrs)
-        let nameSize = nameStr.size()
-        textY -= nameSize.height
         nameStr.draw(at: NSPoint(x: rect.minX + padding, y: textY))
     }
 
@@ -336,7 +333,10 @@ struct CollageView: View {
             let config = NSImage.SymbolConfiguration(pointSize: CGFloat(size) / 4, weight: .light)
             let configured = symbolImage.withSymbolConfiguration(config) ?? symbolImage
             let iconSize = configured.size
-            let origin = NSPoint(x: CGFloat(size - Int(iconSize.width)) / 2, y: CGFloat(size - Int(iconSize.height)) / 2)
+            let origin = NSPoint(
+                x: CGFloat(size - Int(iconSize.width)) / 2,
+                y: CGFloat(size - Int(iconSize.height)) / 2
+            )
             configured.draw(at: origin, from: .zero, operation: .sourceOver, fraction: 0.3)
         }
 

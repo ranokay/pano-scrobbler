@@ -11,97 +11,84 @@ struct AppsAllowlistView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: Spacing.lg) {
-                header
-                tabPicker
-                buttonRow
-                appsList
+        VStack(spacing: 0) {
+            Picker("Filter Mode", selection: $selectedTab) {
+                ForEach(AppFilterTab.allCases, id: \.self) { tab in
+                    Text(tab.rawValue).tag(tab)
+                }
             }
-            .padding(Spacing.lg)
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .padding(.horizontal, Layout.windowPadding)
+            .padding(.vertical, 10)
+            .frame(maxWidth: 360)
+
+            Divider()
+
+            content
         }
-    }
-
-    // MARK: - Header
-
-    private var header: some View {
-        VStack(alignment: .leading, spacing: Spacing.xs) {
-            Text("App Filter")
-                .font(.displayLarge)
-
-            Text(headerDescription)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+        .navigationSubtitle(headerDescription)
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button {
+                    chooseApp()
+                } label: {
+                    Label("Choose App…", systemImage: "plus")
+                }
+            }
         }
     }
 
     private var headerDescription: String {
         switch selectedTab {
         case .allowlist:
-            "Only scrobble from these apps. Leave empty to scrobble from all detected apps."
+            "Only scrobble from chosen apps (empty = all)"
         case .blocklist:
-            "Never scrobble from these apps, even if they are detected."
+            "Never scrobble from chosen apps"
         }
     }
 
-    // MARK: - Tab Picker
-
-    private var tabPicker: some View {
-        Picker("Filter Mode", selection: $selectedTab) {
-            ForEach(AppFilterTab.allCases, id: \.self) { tab in
-                Text(tab.rawValue).tag(tab)
-            }
-        }
-        .pickerStyle(.segmented)
-        .frame(maxWidth: 300)
-    }
-
-    // MARK: - Button Row
-
-    private var buttonRow: some View {
-        HStack(spacing: Spacing.md) {
-            Button {
-                chooseApp()
-            } label: {
-                Label("Choose App…", systemImage: "folder")
-            }
-
-            Spacer()
-        }
-    }
-
-    // MARK: - Apps List
+    // MARK: - Content
 
     @ViewBuilder
-    private var appsList: some View {
-        let ids: [String] = currentIDs
+    private var content: some View {
+        let ids = currentIDs
 
         if ids.isEmpty {
-            ContentUnavailableView(
-                selectedTab == .allowlist ? "All Apps Allowed" : "No Apps Blocked",
-                systemImage: selectedTab == .allowlist ? "app.badge.checkmark" : "nosign",
-                description: Text("Choose an app above to add it to the \(selectedTab.rawValue.lowercased()).")
-            )
-            .frame(maxWidth: .infinity)
-            .padding(.vertical, Spacing.lg)
-        } else {
-            LazyVStack(spacing: Spacing.sm) {
-                ForEach(Array(ids.enumerated()), id: \.element) { index, bundleID in
-                    AppRow(
-                        bundleID: bundleID,
-                        onDelete: {
-                            withAnimation {
-                                switch selectedTab {
-                                case .allowlist:
-                                    model.removeAllowedAppIDs(at: IndexSet(integer: index))
-                                case .blocklist:
-                                    model.removeBlockedAppIDs(at: IndexSet(integer: index))
-                                }
-                            }
-                        }
-                    )
+            ContentUnavailableView {
+                Label(
+                    selectedTab == .allowlist ? "All Apps Allowed" : "No Apps Blocked",
+                    systemImage: selectedTab == .allowlist ? "app.badge.checkmark" : "nosign"
+                )
+            } description: {
+                Text("Choose an app to add it to the \(selectedTab.rawValue.lowercased()).")
+            } actions: {
+                Button("Choose App…") {
+                    chooseApp()
                 }
             }
+        } else {
+            List {
+                ForEach(Array(ids.enumerated()), id: \.element) { index, bundleID in
+                    AppRow(bundleID: bundleID)
+                        .swipeActions(edge: .trailing, allowsFullSwipe: true) {
+                            Button(role: .destructive) {
+                                withAnimation {
+                                    switch selectedTab {
+                                    case .allowlist:
+                                        model.removeAllowedAppIDs(at: IndexSet(integer: index))
+                                    case .blocklist:
+                                        model.removeBlockedAppIDs(at: IndexSet(integer: index))
+                                    }
+                                }
+                            } label: {
+                                Label("Remove", systemImage: "trash")
+                            }
+                        }
+                }
+            }
+            .listStyle(.inset)
+            .scrollContentBackground(.hidden)
         }
     }
 
@@ -142,33 +129,23 @@ struct AppsAllowlistView: View {
 
 private struct AppRow: View {
     var bundleID: String
-    var onDelete: () -> Void
 
     var body: some View {
-        GlassCard(spacing: Spacing.sm) {
-            HStack(spacing: Spacing.md) {
-                appIcon
-                    .frame(width: 28, height: 28)
+        HStack(spacing: Layout.sectionSpacing) {
+            appIcon
+                .frame(width: 32, height: 32)
 
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(appName)
-                        .font(.system(size: 13, weight: .medium))
-                    Text(bundleID)
-                        .font(.system(size: 11, design: .monospaced))
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                }
-
-                Spacer()
-
-                Button(role: .destructive, action: onDelete) {
-                    Image(systemName: "xmark.circle.fill")
-                        .foregroundStyle(.secondary)
-                        .font(.system(size: 14))
-                }
-                .buttonStyle(.borderless)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(appName).font(.body)
+                Text(bundleID)
+                    .font(.callout.monospaced())
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
             }
+
+            Spacer()
         }
+        .padding(.vertical, 2)
     }
 
     @ViewBuilder
@@ -179,7 +156,7 @@ private struct AppRow: View {
                 .aspectRatio(contentMode: .fit)
         } else {
             Image(systemName: "app.fill")
-                .font(.system(size: 20))
+                .font(.title3)
                 .foregroundStyle(.secondary)
         }
     }
@@ -187,7 +164,9 @@ private struct AppRow: View {
     private var appName: String {
         if let path = NSWorkspace.shared.urlForApplication(withBundleIdentifier: bundleID),
            let bundle = Bundle(url: path),
-           let name = bundle.infoDictionary?["CFBundleName"] as? String ?? bundle.infoDictionary?["CFBundleDisplayName"] as? String {
+           let name = bundle.infoDictionary?["CFBundleName"] as? String
+            ?? bundle.infoDictionary?["CFBundleDisplayName"] as? String
+        {
             return name
         }
         return bundleID

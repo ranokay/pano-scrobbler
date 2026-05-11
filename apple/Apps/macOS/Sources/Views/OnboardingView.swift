@@ -1,7 +1,8 @@
-import SwiftUI
+import AppKit
 import Core
+import SwiftUI
 
-/// First-launch onboarding wizard — analogous to Kotlin's onboarding flow.
+/// First-launch onboarding wizard.
 struct OnboardingView: View {
     @ObservedObject var model: AppModel
     @Binding var hasCompletedOnboarding: Bool
@@ -29,171 +30,178 @@ struct OnboardingView: View {
 
             Divider()
 
-            // Navigation bar
-            HStack {
-                // Step dots
-                HStack(spacing: 8) {
-                    ForEach(0..<totalSteps, id: \.self) { index in
-                        Circle()
-                            .fill(index == currentStep ? Color.accentColor : Color.secondary.opacity(0.3))
-                            .frame(width: 8, height: 8)
-                            .animation(.easeInOut(duration: 0.2), value: currentStep)
-                    }
-                }
+            // Footer: progress + navigation
+            HStack(spacing: Layout.sectionSpacing) {
+                ProgressView(value: Double(currentStep + 1), total: Double(totalSteps))
+                    .progressViewStyle(.linear)
+                    .frame(width: 140)
+                    .accessibilityLabel("Step \(currentStep + 1) of \(totalSteps)")
 
                 Spacer()
 
-                HStack(spacing: Spacing.md) {
-                    if currentStep > 0 {
-                        Button("Back") {
-                            withAnimation { currentStep -= 1 }
-                        }
-                        .buttonStyle(.bordered)
+                if currentStep > 0 {
+                    Button("Back") {
+                        withAnimation { currentStep -= 1 }
                     }
+                    .standardGlassButton()
+                    .controlSize(.large)
+                }
 
-                    if currentStep < totalSteps - 1 {
-                        Button("Next") {
-                            withAnimation { currentStep += 1 }
-                        }
-                        .buttonStyle(.borderedProminent)
-                    } else {
-                        Button("Get Started") {
-                            withAnimation {
-                                hasCompletedOnboarding = true
-                            }
-                        }
-                        .buttonStyle(.borderedProminent)
+                if currentStep < totalSteps - 1 {
+                    Button("Next") {
+                        withAnimation { currentStep += 1 }
                     }
+                    .prominentGlassButton()
+                    .controlSize(.large)
+                    .keyboardShortcut(.defaultAction)
+                } else {
+                    Button("Get Started") {
+                        withAnimation {
+                            hasCompletedOnboarding = true
+                        }
+                    }
+                    .prominentGlassButton()
+                    .controlSize(.large)
+                    .keyboardShortcut(.defaultAction)
                 }
             }
-            .padding(Spacing.lg)
+            .padding(Layout.windowPadding)
         }
-        .frame(width: 560, height: 420)
+        .frame(width: 560, height: 460)
+        .adaptiveWindowBackground()
     }
 
     // MARK: - Steps
 
     private var welcomeStep: some View {
-        VStack(spacing: Spacing.xl) {
+        VStack(spacing: Layout.sectionSpacing) {
             Spacer()
 
             Image(systemName: "music.note.list")
                 .font(.system(size: 64))
-                .foregroundStyle(.linearGradient(
-                    colors: [.purple, .pink, .orange],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ))
+                .foregroundStyle(.tint)
                 .symbolEffect(.pulse, options: .repeating)
 
             Text("Welcome to Pano Scrobbler")
-                .font(.system(size: 28, weight: .bold))
+                .font(.largeTitle.weight(.semibold))
 
             Text("Track your music listening across Last.fm, ListenBrainz, and more.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 380)
+                .frame(maxWidth: 400)
 
             Spacer()
         }
-        .padding(Spacing.xl)
+        .padding(Layout.windowPadding)
     }
 
     private var accountStep: some View {
-        VStack(spacing: Spacing.lg) {
+        VStack(spacing: Layout.sectionSpacing) {
             Spacer()
 
             Image(systemName: "person.crop.circle.badge.plus")
-                .font(.system(size: 48))
-                .foregroundStyle(.blue)
+                .font(.system(size: 56))
+                .foregroundStyle(.tint)
 
             Text("Add an Account")
-                .font(.title2.weight(.semibold))
+                .font(.title.weight(.semibold))
 
-            Text("Connect your scrobbling service to start tracking.")
+            Text("Connect a scrobbling service to start tracking your listens.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 380)
+                .frame(maxWidth: 400)
 
-            VStack(spacing: Spacing.sm) {
+            GroupBox {
                 if model.accounts.isEmpty {
-                    HStack(spacing: Spacing.sm) {
+                    Label {
+                        Text("No accounts configured yet. You can add them from the Accounts tab after setup.")
+                            .font(.callout)
+                            .foregroundStyle(.secondary)
+                    } icon: {
                         Image(systemName: "info.circle")
                             .foregroundStyle(.orange)
-                        Text("No accounts configured yet. You can add them from the Accounts tab after setup.")
-                            .font(.system(size: 12))
-                            .foregroundStyle(.secondary)
                     }
-                    .padding(Spacing.md)
-                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+                    .padding(.vertical, 4)
                 } else {
-                    ForEach(model.accounts.filter(\.enabled)) { acct in
-                        HStack(spacing: Spacing.sm) {
-                            Image(systemName: "checkmark.circle.fill")
+                    VStack(alignment: .leading, spacing: 6) {
+                        ForEach(model.accounts.filter(\.enabled)) { acct in
+                            Label("\(acct.type.displayName): \(acct.username)",
+                                  systemImage: "checkmark.circle.fill")
+                                .labelStyle(.titleAndIcon)
                                 .foregroundStyle(.green)
-                            Text("\(acct.type.displayName): \(acct.username)")
-                                .font(.system(size: 13))
+                                .font(.callout)
                         }
                     }
+                    .padding(.vertical, 4)
                 }
             }
-            .frame(maxWidth: 340)
+            .frame(maxWidth: 400)
 
             Spacer()
         }
-        .padding(Spacing.xl)
+        .padding(Layout.windowPadding)
     }
 
     private var permissionStep: some View {
-        VStack(spacing: Spacing.lg) {
+        VStack(spacing: Layout.sectionSpacing) {
             Spacer()
 
             Image(systemName: "lock.shield")
-                .font(.system(size: 48))
+                .font(.system(size: 56))
                 .foregroundStyle(.green)
 
             Text("Permissions")
-                .font(.title2.weight(.semibold))
+                .font(.title.weight(.semibold))
 
             Text("Pano Scrobbler uses macOS Automation permission to read now-playing metadata from Music and Spotify.")
                 .font(.body)
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(.center)
-                .frame(maxWidth: 380)
+                .frame(maxWidth: 420)
 
-            VStack(alignment: .leading, spacing: Spacing.sm) {
-                permissionRow("Automation", description: "Required when Music or Spotify first share now-playing metadata", icon: "applescript.fill")
-                permissionRow("Notifications", description: "Optional — show alerts when tracks are scrobbled", icon: "bell.fill")
+            GroupBox {
+                VStack(alignment: .leading, spacing: Layout.inlineSpacing) {
+                    permissionRow(
+                        "Automation",
+                        description: "Required when Music or Spotify first share now-playing metadata",
+                        icon: "applescript"
+                    )
+                    Divider()
+                    permissionRow(
+                        "Notifications",
+                        description: "Optional — show alerts when tracks are scrobbled",
+                        icon: "bell"
+                    )
+                }
+                .padding(.vertical, 4)
             }
-            .padding(Spacing.md)
-            .frame(maxWidth: 380)
+            .frame(maxWidth: 420)
 
             Button("Open System Settings") {
                 NSWorkspace.shared.open(URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Automation")!)
             }
-            .buttonStyle(.bordered)
+            .standardGlassButton()
 
             Spacer()
         }
-        .padding(Spacing.xl)
+        .padding(Layout.windowPadding)
     }
 
     private func permissionRow(_ title: String, description: String, icon: String) -> some View {
-        HStack(spacing: Spacing.md) {
-            Image(systemName: icon)
-                .font(.system(size: 16))
-                .foregroundStyle(.secondary)
-                .frame(width: 24)
-
+        Label {
             VStack(alignment: .leading, spacing: 2) {
-                Text(title)
-                    .font(.system(size: 13, weight: .semibold))
+                Text(title).font(.callout.weight(.semibold))
                 Text(description)
-                    .font(.system(size: 11))
+                    .font(.caption)
                     .foregroundStyle(.tertiary)
             }
+        } icon: {
+            Image(systemName: icon)
+                .foregroundStyle(.secondary)
+                .frame(width: 22)
         }
+        .padding(.vertical, 4)
     }
 }

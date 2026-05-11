@@ -20,8 +20,18 @@ permissions:
 
 jobs:
   macos:
-    name: Test and build macOS
+    name: Test and build macOS (${{ matrix.release_arch }})
     runs-on: macos-26
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - release_arch: arm64
+            swift_arch: arm64
+            dmg_name: pano-scrobbler-macos-arm64.dmg
+          - release_arch: x64
+            swift_arch: x86_64
+            dmg_name: pano-scrobbler-macos-x64.dmg
     steps:
       - name: Checkout repository
         uses: actions/checkout@v6
@@ -67,19 +77,16 @@ jobs:
         env:
           MACOS_CODESIGN_IDENTITY: ${{ secrets.MACOS_CODESIGN_IDENTITY }}
           MACOS_DMG_CODESIGN_IDENTITY: ${{ secrets.MACOS_DMG_CODESIGN_IDENTITY || secrets.MACOS_CODESIGN_IDENTITY }}
-          NOTARYTOOL_PROFILE: ${{ secrets.NOTARYTOOL_PROFILE }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           PANO_DISCORD_CLIENT_ID: ${{ secrets.PANO_DISCORD_CLIENT_ID }}
-          REQUIRE_NOTARIZATION: ${{ ((github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'workflow_dispatch') && '1' || '0' }}
+          ARCHS: ${{ matrix.swift_arch }}
+          DMG_NAME: ${{ matrix.dmg_name }}
         run: bash apple/scripts/build_dmg.sh
 
       - name: Upload macOS DMG artifact
         uses: actions/upload-artifact@v6
         with:
-          name: pano-scrobbler-macos-universal
-          path: dist/pano-scrobbler-macos-universal.dmg
+          name: pano-scrobbler-macos-${{ matrix.release_arch }}
+          path: dist/${{ matrix.dmg_name }}
 
   publish-release:
     name: Publish macOS release
@@ -95,8 +102,9 @@ jobs:
       - name: Download macOS DMG artifact
         uses: actions/download-artifact@v8
         with:
-          name: pano-scrobbler-macos-universal
+          pattern: pano-scrobbler-macos-*
           path: dist
+          merge-multiple: true
 
       - name: Read release metadata
         id: release_metadata
