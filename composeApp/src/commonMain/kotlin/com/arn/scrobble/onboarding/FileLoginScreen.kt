@@ -6,6 +6,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.width
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -22,8 +23,8 @@ import com.arn.scrobble.api.file.FileScrobblable
 import com.arn.scrobble.ui.FilePicker
 import com.arn.scrobble.ui.FilePickerMode
 import com.arn.scrobble.ui.FileType
-import com.arn.scrobble.ui.OutlinedToggleButtons
 import com.arn.scrobble.ui.PanoSnackbarVisuals
+import com.arn.scrobble.ui.PanoToggleButtonGroup
 import com.arn.scrobble.utils.PlatformFile
 import com.arn.scrobble.utils.Stuff
 import kotlinx.coroutines.delay
@@ -33,6 +34,7 @@ import pano_scrobbler.composeapp.generated.resources.Res
 import pano_scrobbler.composeapp.generated.resources.convert_file
 import pano_scrobbler.composeapp.generated.resources.create
 import pano_scrobbler.composeapp.generated.resources.open_existing
+import kotlin.time.Duration.Companion.seconds
 
 @Composable
 fun FileLoginScreen(
@@ -73,7 +75,7 @@ fun FileLoginScreen(
                     getString(Res.string.create) + " ." + type.name
                 )
             )
-            delay(1000)
+            delay(1.seconds)
 
             val fileNameWithoutExtension =
                 fromFile.name().substringBeforeLast('.')
@@ -89,8 +91,8 @@ fun FileLoginScreen(
         verticalArrangement = Arrangement.spacedBy(24.dp, Alignment.CenterVertically)
     ) {
 
-        OutlinedToggleButtons(
-            items = FileScrobblable.FileFormat.entries.map { "." + it.name },
+        PanoToggleButtonGroup(
+            texts = FileScrobblable.FileFormat.entries.map { "." + it.name },
             selectedIndex = selectedFileFormat?.ordinal ?: -1,
             onSelected = {
                 selectedFileFormat = FileScrobblable.FileFormat.entries[it]
@@ -103,6 +105,7 @@ fun FileLoginScreen(
                 modifier = Modifier.width(IntrinsicSize.Max)
             ) {
                 OutlinedButton(
+                    shapes = ButtonDefaults.shapes(),
                     onClick = {
                         convert = false
                         filePickerMode =
@@ -114,6 +117,7 @@ fun FileLoginScreen(
                 ) { Text(stringResource(Res.string.create)) }
 
                 OutlinedButton(
+                    shapes = ButtonDefaults.shapes(),
                     onClick = {
                         convert = false
                         filePickerMode = FilePickerMode.Open()
@@ -131,6 +135,7 @@ fun FileLoginScreen(
                     }
 
                 OutlinedButton(
+                    shapes = ButtonDefaults.shapes(),
                     onClick = {
                         convert = true
                         filePickerMode = FilePickerMode.Open()

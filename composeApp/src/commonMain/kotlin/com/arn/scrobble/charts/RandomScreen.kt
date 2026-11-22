@@ -1,19 +1,17 @@
 package com.arn.scrobble.charts
 
-import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.widthIn
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.SplitButtonDefaults
 import androidx.compose.material3.SplitButtonLayout
 import androidx.compose.material3.Text
@@ -22,7 +20,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSerializable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -41,9 +39,9 @@ import com.arn.scrobble.icons.Icons
 import com.arn.scrobble.icons.Mic
 import com.arn.scrobble.icons.MusicNote
 import com.arn.scrobble.navigation.PanoRoute
-import com.arn.scrobble.navigation.jsonSerializableSaver
 import com.arn.scrobble.ui.ErrorText
 import com.arn.scrobble.ui.MusicEntryListItem
+import com.arn.scrobble.ui.PanoDropdownMenu
 import com.arn.scrobble.ui.getMusicEntryPlaceholderItem
 import com.arn.scrobble.ui.shimmerWindowBounds
 import com.arn.scrobble.utils.PlatformStuff
@@ -51,6 +49,7 @@ import com.arn.scrobble.utils.Stuff
 import com.arn.scrobble.utils.Stuff.collectAsStateWithInitialValue
 import com.arn.scrobble.utils.redactedMessage
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.take
 import org.jetbrains.compose.resources.stringResource
@@ -59,6 +58,7 @@ import pano_scrobbler.composeapp.generated.resources.album
 import pano_scrobbler.composeapp.generated.resources.artist
 import pano_scrobbler.composeapp.generated.resources.item_options
 import pano_scrobbler.composeapp.generated.resources.loved
+import pano_scrobbler.composeapp.generated.resources.random_text
 import pano_scrobbler.composeapp.generated.resources.track
 
 
@@ -68,16 +68,13 @@ fun RandomScreen(
     onNavigate: (PanoRoute) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: RandomVM = viewModel { RandomVM(user.name) },
-    chartsPeriodViewModel: ChartsPeriodVM = viewModel { ChartsPeriodVM(user) },
+    chartsPeriodViewModel: ChartsPeriodVM = viewModel { ChartsPeriodVM() },
 ) {
     val musicEntry by viewModel.musicEntry.collectAsStateWithLifecycle()
     val hasLoaded by viewModel.hasLoaded.collectAsStateWithLifecycle()
     val error by viewModel.error.collectAsStateWithLifecycle()
-    val type by PlatformStuff.mainPrefs.data
-        .collectAsStateWithInitialValue { it.randomType }
-    var timePeriod by rememberSaveable(saver = jsonSerializableSaver<TimePeriod?>()) {
-        mutableStateOf(null)
-    }
+    val type by PlatformStuff.mainPrefs.data.collectAsStateWithInitialValue { it.randomType }
+    var timePeriod by rememberSerializable { mutableStateOf<TimePeriod?>(null) }
 
     val isTimePeriodContinuous = timePeriod?.lastfmPeriod != null
 
@@ -108,6 +105,7 @@ fun RandomScreen(
     // first load
     LaunchedEffect(user) {
         PlatformStuff.mainPrefs.data.map { it.randomType }
+            .distinctUntilChanged()
             .combine(chartsPeriodViewModel.selectedPeriod) { type, selectedPeriod ->
                 type to selectedPeriod
             }
@@ -118,28 +116,25 @@ fun RandomScreen(
     }
 
     Column(
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
         modifier = modifier
     ) {
-
-        AnimatedVisibility(
-            visible = type != Stuff.TYPE_LOVES,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            TimePeriodSelector(
-                user = user,
-                viewModel = chartsPeriodViewModel,
-                onSelected = { curr, prev, _ ->
-                    timePeriod = curr
-                    load(type)
-                },
-                showRefreshButton = false,
-            )
-        }
+        TimePeriodSelector(
+            registeredTime = user.registeredTime,
+            viewModel = chartsPeriodViewModel,
+            onNavigate = onNavigate,
+            onSelected = { curr, prev, _ ->
+                timePeriod = curr
+                load(type)
+            },
+            showRefreshButton = false,
+            enabled = type != Stuff.TYPE_LOVES
+        )
 
         BoxWithConstraints(
-            modifier = Modifier.weight(1f)
+            contentAlignment = Alignment.Center,
+            modifier = Modifier
+                .weight(1f)
+                .align(Alignment.CenterHorizontally)
         ) {
             val isLandscape = (maxWidth * 0.7f) > maxHeight
 
@@ -174,7 +169,6 @@ fun RandomScreen(
                         fixedImageHeight = false,
                         isColumn = !isLandscape,
                         modifier = Modifier
-                            .fillMaxSize()
                             .then(
                                 if (!hasLoaded) Modifier.shimmerWindowBounds()
                                 else Modifier
@@ -183,6 +177,9 @@ fun RandomScreen(
                 }
             }
         }
+
+        Spacer(modifier = Modifier.height(8.dp))
+
         RandomTypeSelector(
             type = type,
             onSameClick = {
@@ -191,12 +188,13 @@ fun RandomScreen(
             onMenuItemClick = { newType ->
                 load(newType)
             },
+            modifier = Modifier
+                .align(Alignment.CenterHorizontally)
         )
 
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun RandomTypeSelector(
     type: Int,
@@ -234,10 +232,18 @@ private fun RandomTypeSelector(
                     Icon(
                         getIconForType(type),
                         contentDescription = null,
-                        modifier = Modifier.padding(end = 4.dp)
+                        modifier = Modifier.padding(end = 8.dp)
                     )
 
-                    Text(text = getTextForType(type))
+                    Column(
+                        modifier = Modifier.padding(vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = stringResource(Res.string.random_text),
+                            style = MaterialTheme.typography.labelMedium
+                        )
+                        Text(text = getTextForType(type))
+                    }
                 }
             },
             trailingButton = {
@@ -245,47 +251,44 @@ private fun RandomTypeSelector(
                     onCheckedChange = {
                         typeSelectorIsShown = it
                     },
-                    checked = typeSelectorIsShown
+                    checked = typeSelectorIsShown,
+                    modifier = Modifier.fillMaxHeight()
                 ) {
                     Icon(
                         Icons.ArrowDropDown,
                         contentDescription = stringResource(Res.string.item_options)
                     )
                 }
-                Icon(
-                    Icons.ArrowDropDown,
-                    contentDescription = stringResource(Res.string.item_options)
-                )
+
+                PanoDropdownMenu(
+                    expanded = typeSelectorIsShown,
+                    onDismissRequest = { typeSelectorIsShown = false }
+                ) {
+                    arrayOf(
+                        Stuff.TYPE_ARTISTS,
+                        Stuff.TYPE_ALBUMS,
+                        Stuff.TYPE_TRACKS,
+                        Stuff.TYPE_LOVES
+                    ).forEach { thisType ->
+                        item(
+                            enabled = thisType != type,
+                            onClick = {
+                                typeSelectorIsShown = false
+                                onMenuItemClick(thisType)
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    getIconForType(thisType),
+                                    contentDescription = getTextForType(thisType)
+                                )
+                            },
+                            text = {
+                                Text(getTextForType(thisType))
+                            }
+                        )
+                    }
+                }
             },
         )
-
-        DropdownMenu(
-            expanded = typeSelectorIsShown,
-            onDismissRequest = { typeSelectorIsShown = false }
-        ) {
-            arrayOf(
-                Stuff.TYPE_ARTISTS,
-                Stuff.TYPE_ALBUMS,
-                Stuff.TYPE_TRACKS,
-                Stuff.TYPE_LOVES
-            ).forEach { thisType ->
-                DropdownMenuItem(
-                    enabled = thisType != type,
-                    onClick = {
-                        typeSelectorIsShown = false
-                        onMenuItemClick(thisType)
-                    },
-                    leadingIcon = {
-                        Icon(
-                            getIconForType(thisType),
-                            contentDescription = getTextForType(thisType)
-                        )
-                    },
-                    text = {
-                        Text(getTextForType(thisType))
-                    }
-                )
-            }
-        }
     }
 }

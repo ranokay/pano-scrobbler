@@ -1,0 +1,19 @@
+[Icon Theme]
+Name=pano-scrobbler-icons
+Directories=scalable/apps,symbolic/apps
+FollowsColorScheme=true
+Comment=This is meant for the appimage and standalone use. Do not copy this file to /usr/share/icons etc.
+
+[scalable/apps]
+Size=48
+MinSize=8
+MaxSize=512
+Type=Scalable
+Context=Applications
+
+[symbolic/apps]
+Size=48
+MinSize=8
+MaxSize=512
+Type=Scalable
+Context=Applications

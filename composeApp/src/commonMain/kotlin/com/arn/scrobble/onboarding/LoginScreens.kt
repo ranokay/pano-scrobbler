@@ -1,27 +1,20 @@
 package com.arn.scrobble.onboarding
 
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardCapitalization
 import androidx.compose.ui.text.input.KeyboardType
-import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -30,7 +23,8 @@ import com.arn.scrobble.api.UserAccountTemp
 import com.arn.scrobble.icons.Icons
 import com.arn.scrobble.icons.OpenInBrowser
 import com.arn.scrobble.navigation.PanoRoute
-import com.arn.scrobble.ui.InfoText
+import com.arn.scrobble.ui.ButtonWithIcon
+import com.arn.scrobble.ui.PanoOutlinedSecureTextField
 import com.arn.scrobble.ui.PanoOutlinedTextField
 import com.arn.scrobble.ui.VerifyButton
 import com.arn.scrobble.ui.testTagsAsResId
@@ -47,19 +41,23 @@ import pano_scrobbler.composeapp.generated.resources.username
 
 @Composable
 fun ListenBrainzLoginScreen(
-    hasCustomApiRoot: Boolean,
+    customServerSlot: Int?,
     onDone: () -> Unit,
     modifier: Modifier = Modifier,
     viewModel: LoginViewModel = viewModel { LoginViewModel() },
 ) {
-    var token by rememberSaveable { mutableStateOf("") }
-    var apiRoot by rememberSaveable { mutableStateOf("https://") }
+    val token = rememberTextFieldState()
+    val apiRoot = rememberTextFieldState("https://")
     val result by viewModel.result.collectAsStateWithLifecycle(null)
     val doLogin = {
-        if (hasCustomApiRoot) {
-            viewModel.listenBrainzLogin(apiRoot, token)
+        if (customServerSlot != null) {
+            viewModel.listenBrainzLogin(
+                token.text.toString(),
+                customServerSlot,
+                apiRoot.text.toString()
+            )
         } else {
-            viewModel.listenBrainzLogin(token = token)
+            viewModel.listenBrainzLogin(token.text.toString(), customServerSlot)
         }
     }
 
@@ -68,12 +66,11 @@ fun ListenBrainzLoginScreen(
         modifier = modifier
     ) {
 
-        if (hasCustomApiRoot) {
+        if (customServerSlot != null) {
             PanoOutlinedTextField(
+                apiRoot,
                 modifier = Modifier.fillMaxWidth(),
-                value = apiRoot,
                 singleLine = true,
-                onValueChange = { apiRoot = it },
                 label = { Text(stringResource(Res.string.api_url)) },
                 keyboardOptions = KeyboardOptions(
                     keyboardType = KeyboardType.Uri,
@@ -82,47 +79,50 @@ fun ListenBrainzLoginScreen(
                 )
             )
         } else {
-            InfoText(
+            ButtonWithIcon(
+                onClick = {
+                    PlatformStuff.openInBrowser("https://listenbrainz.org/profile")
+                },
                 text = stringResource(
                     Res.string.listenbrainz_info,
-                    "https://listenbrainz.org/profile"
+                    "listenbrainz.org/profile"
                 ),
                 icon = Icons.OpenInBrowser,
+                maxLines = 3,
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(MaterialTheme.shapes.medium)
-                    .clickable {
-                        PlatformStuff.openInBrowser("https://listenbrainz.org/profile")
-                    }
-                    .border(
-                        1.dp,
-                        MaterialTheme.colorScheme.outlineVariant,
-                        shape = MaterialTheme.shapes.medium
-                    )
+                    .align(Alignment.CenterHorizontally)
             )
         }
 
         PanoOutlinedTextField(
+            token,
             modifier = Modifier.fillMaxWidth(),
-            value = token,
             singleLine = true,
-            onValueChange = { token = it },
             label = { Text(stringResource(Res.string.pref_token_label)) },
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Text,
                 capitalization = KeyboardCapitalization.None,
                 imeAction = ImeAction.Done
             ),
-            keyboardActions = KeyboardActions(
-                onDone = {
-                    doLogin()
-                }
-            )
+            onKeyboardAction = { performDefaultAction ->
+                doLogin()
+                performDefaultAction()
+            }
         )
 
         VerifyButton(
             onDone = onDone,
             doStuff = doLogin,
+            onTrustAll = if (customServerSlot != null) {
+                {
+                    viewModel.listenBrainzLogin(
+                        token.text.toString(),
+                        customServerSlot,
+                        apiRoot.text.toString(),
+                        true
+                    )
+                }
+            } else null,
             result = result
         )
     }
@@ -135,12 +135,16 @@ fun GnufmLoginScreen(
     modifier: Modifier = Modifier,
     viewModel: LoginViewModel = viewModel { LoginViewModel() },
 ) {
-    var username by rememberSaveable { mutableStateOf("") }
-    var password by rememberSaveable { mutableStateOf("") }
-    var apiRoot by rememberSaveable { mutableStateOf("") }
+    val username = rememberTextFieldState()
+    val password = rememberTextFieldState()
+    val apiRoot = rememberTextFieldState()
     val result by viewModel.result.collectAsStateWithLifecycle(null)
     val doLogin = {
-        viewModel.gnufmLogin(apiRoot, username, password)
+        viewModel.gnufmLogin(
+            apiRoot.text.toString(),
+            username.text.toString(),
+            password.text.toString()
+        )
     }
 
     Column(
@@ -148,10 +152,9 @@ fun GnufmLoginScreen(
         modifier = modifier.testTagsAsResId()
     ) {
         PanoOutlinedTextField(
+            apiRoot,
             modifier = Modifier.fillMaxWidth().testTag("login_url"),
             singleLine = true,
-            value = apiRoot,
-            onValueChange = { apiRoot = it },
             label = { Text(stringResource(Res.string.api_url)) },
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Uri,
@@ -160,10 +163,9 @@ fun GnufmLoginScreen(
             )
         )
         PanoOutlinedTextField(
-            modifier = Modifier.fillMaxWidth().testTag("login_username"),
+            username,
             singleLine = true,
-            value = username,
-            onValueChange = { username = it },
+            modifier = Modifier.fillMaxWidth().testTag("login_username"),
             label = { Text(stringResource(Res.string.username)) },
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Text,
@@ -171,23 +173,14 @@ fun GnufmLoginScreen(
                 imeAction = ImeAction.Next
             )
         )
-        PanoOutlinedTextField(
+        PanoOutlinedSecureTextField(
+            password,
             modifier = Modifier.fillMaxWidth().testTag("login_password"),
-            singleLine = true,
-            value = password,
-            onValueChange = { password = it },
-            visualTransformation = remember { PasswordVisualTransformation() },
             label = { Text(stringResource(Res.string.password)) },
-            keyboardOptions = KeyboardOptions(
-                keyboardType = KeyboardType.Password,
-                capitalization = KeyboardCapitalization.None,
-                imeAction = ImeAction.Done
-            ),
-            keyboardActions = KeyboardActions(
-                onDone = {
-                    doLogin()
-                }
-            )
+            onKeyboardAction = { performDefaultAction ->
+                doLogin()
+                performDefaultAction()
+            }
         )
 
         VerifyButton(
@@ -204,7 +197,7 @@ fun PleromaLoginScreen(
     modifier: Modifier = Modifier,
     viewModel: LoginViewModel = viewModel { LoginViewModel() },
 ) {
-    var apiRoot by rememberSaveable { mutableStateOf("https://") }
+    val apiRoot = rememberTextFieldState("https://")
     val result by viewModel.pleromaCredsResult.collectAsStateWithLifecycle(null)
     val redirectUri = remember {
         if (PlatformStuff.isTv)
@@ -213,7 +206,7 @@ fun PleromaLoginScreen(
             "urn:ietf:wg:oauth:2.0:oob"
     }
     val onSubmit = {
-        viewModel.pleromaCreateApp(apiRoot, redirectUri)
+        viewModel.pleromaCreateApp(apiRoot.text.toString(), redirectUri)
     }
 
     Column(
@@ -221,29 +214,27 @@ fun PleromaLoginScreen(
         modifier = modifier
     ) {
         PanoOutlinedTextField(
+            apiRoot,
             modifier = Modifier.fillMaxWidth(),
-            value = apiRoot,
             singleLine = true,
-            onValueChange = { apiRoot = it },
             label = { Text(stringResource(Res.string.server_url)) },
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Uri,
                 capitalization = KeyboardCapitalization.None,
                 imeAction = ImeAction.Done
             ),
-            keyboardActions = KeyboardActions(
-                onDone = {
-                    onSubmit()
-                }
-            )
+            onKeyboardAction = { performDefaultAction ->
+                onSubmit()
+                performDefaultAction()
+            }
         )
 
         VerifyButton(
             onDone = {
                 val creds = result?.getOrNull() ?: return@VerifyButton
-                val _apiRoot = if (apiRoot.endsWith('/')) apiRoot else "$apiRoot/"
+                val _apiRoot = if (apiRoot.text.endsWith('/')) apiRoot.text else "${apiRoot.text}/"
 
-                val userAccountTemp = UserAccountTemp(AccountType.PLEROMA, "", _apiRoot)
+                val userAccountTemp = UserAccountTemp(AccountType.PLEROMA, "", _apiRoot.toString())
                 val url =
                     "${_apiRoot}oauth/authorize?client_id=${creds.client_id}&redirect_uri=${
                         creds.redirect_uri

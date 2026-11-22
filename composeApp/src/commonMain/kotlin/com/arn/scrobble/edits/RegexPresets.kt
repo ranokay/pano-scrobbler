@@ -46,18 +46,14 @@ object RegexPresets {
         RegexPreset.single_ep,
     )
 
-    val hasSettings = listOf(
-        RegexPreset.parse_title,
-        RegexPreset.parse_title_with_fallback,
-    )
-
-    private val androidOnlyPresets = listOf(
-        RegexPreset.parse_title,
-        RegexPreset.parse_title_with_fallback,
-//        RegexPreset.album_artist_as_artist,
-    )
-
-    private val desktopOnlyPresets = emptyList<RegexPreset>()
+    // app id settings are currently ignored on linux, uses domain name instead
+    val hasSettings = if (!PlatformStuff.isDesktop)
+        listOf(
+            RegexPreset.parse_title,
+            RegexPreset.parse_title_with_fallback,
+        )
+    else
+        emptyList()
 
     private val applyOncePresets = listOf(
         RegexPreset.parse_title,
@@ -66,10 +62,7 @@ object RegexPresets {
 
     val filteredPresets by lazy {
         RegexPreset.entries.filterNot {
-            if (!PlatformStuff.isDesktop)
-                it in desktopOnlyPresets
-            else
-                it in androidOnlyPresets
+            System.getProperty("os.name").startsWith("windows", ignoreCase = true) && it in applyOncePresets
         }
     }
 
@@ -110,6 +103,25 @@ object RegexPresets {
 
     }
 
+    private fun removeEdgeSymbol(input: String, symbol: String): String? {
+        val first = input.indexOf(symbol)
+        val last = input.lastIndexOf(symbol)
+
+        return when {
+            first == -1 || first != last -> null // none, or more than one
+
+            first == 0 && input.length > symbol.length &&
+                    input[symbol.length].isWhitespace() ->
+                input.removeRange(0, symbol.length)
+
+            first == input.length - symbol.length && first > 0 &&
+                    input[first - 1].isWhitespace() ->
+                input.removeRange(first, input.length)
+
+            else -> null
+        }
+    }
+
     private fun applyPreset(
         scrobbleData: ScrobbleData,
         normalizedUrlHost: String?,
@@ -135,7 +147,12 @@ object RegexPresets {
 
             RegexPreset.parse_title,
             RegexPreset.parse_title_with_fallback -> {
-                if (scrobbleData.appId in regexPresetsApps) {
+                if (scrobbleData.appId in regexPresetsApps ||
+                    regexPreset == RegexPreset.parse_title &&
+                    normalizedUrlHost == Stuff.HOST_YOUTUBE ||
+                    regexPreset == RegexPreset.parse_title_with_fallback &&
+                    normalizedUrlHost == Stuff.HOST_YOUTUBE_MUSIC
+                ) {
                     val shouldParseTitle = (scrobbleData.album.isNullOrEmpty() &&
                             !scrobbleData.artist.endsWith("- Topic")) ||
                             scrobbleData.appId == Stuff.PACKAGE_YMUSIC && scrobbleData.album == "YMusic"
@@ -205,17 +222,20 @@ object RegexPresets {
             RegexPreset.single_ep -> {
                 val pattern = " - (Single|EP)$"
                 val replacement = ""
-                val appIds = setOf(
-                    Stuff.PACKAGE_APPLE_MUSIC,
-                    Stuff.PACKAGE_APPLE_MUSIC_WIN_STORE,
-                    Stuff.PACKAGE_APPLE_MUSIC_WIN_STORE.split("!", limit = 2)
-                        .let { (first, second) -> first + "!" + second.uppercase() },
-                    Stuff.PACKAGE_APPLE_MUSIC_WIN_STORE.split("!", limit = 2)
-                        .let { (first, second) -> first + "!" + second.lowercase() },
-                    Stuff.PACKAGE_APPLE_MUSIC_WIN_EXE
-                )
+                val isAppleMusic = scrobbleData.appId == Stuff.PACKAGE_APPLE_MUSIC ||
+                        scrobbleData.appId == Stuff.PACKAGE_APPLE_MUSIC_WIN_EXE ||
+                        scrobbleData.appId.equals(
+                            Stuff.PACKAGE_APPLE_MUSIC_WIN_STORE,
+                            ignoreCase = true
+                        ) ||
+                        scrobbleData.appId == Stuff.PACKAGE_ITUNES_SMTC_WIN_EXE ||
+                        scrobbleData.appId.equals(
+                            Stuff.PACKAGE_ITUNES_SMTC_WIN_STORE,
+                            ignoreCase = true
+                        ) ||
+                        normalizedUrlHost == Stuff.HOST_APPLE_MUSIC
 
-                if (scrobbleData.appId in appIds || normalizedUrlHost == Stuff.HOST_APPLE_MUSIC) {
+                if (isAppleMusic) {
                     regexEdits += RegexEdit(
                         name = regexPreset.name,
                         search = RegexEdit.SearchPatterns(
@@ -299,6 +319,20 @@ object RegexPresets {
 
         if (regexEdits.isNotEmpty()) {
             newScrobbleData = performRegexReplace(scrobbleData, regexEdits).scrobbleData
+        }
+
+        if (regexPreset == RegexPreset.explicit) {
+            val sd = newScrobbleData ?: scrobbleData
+
+            val track = removeEdgeSymbol(sd.track, "🅴")
+            val album = sd.album?.let { removeEdgeSymbol(it, "🅴") }
+
+            if (track != null || album != null) {
+                newScrobbleData = sd.copy(
+                    track = track ?: sd.track,
+                    album = album ?: sd.album,
+                )
+            }
         }
 
         return newScrobbleData

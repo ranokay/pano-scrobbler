@@ -30,6 +30,7 @@ import kotlinx.coroutines.flow.mapLatest
 import kotlinx.coroutines.flow.stateIn
 import kotlin.math.log10
 import kotlin.math.pow
+import kotlin.time.Duration.Companion.milliseconds
 
 class ChartsVM(
     user: UserCached,
@@ -37,7 +38,7 @@ class ChartsVM(
 ) : ViewModel() {
 
     private val _input = MutableStateFlow<ChartsLoaderInput?>(null)
-    private val _inputDebounced = _input.debounce(500)
+    private val _inputDebounced = _input.debounce(500.milliseconds)
         .filterNotNull()
 
     private val pagingConfig = PagingConfig(
@@ -139,16 +140,16 @@ class ChartsVM(
 
     val scrobblesCount = _inputDebounced.mapLatest { input ->
         if (firstPageOnly && Scrobblables.current?.userAccount?.type == AccountType.LASTFM) {
-            val from = input.timePeriod.lastfmPeriod
-                ?.toTimePeriod()
-                ?.start ?: input.timePeriod.start
-
+            val lastfmTimePeriod = input.timePeriod.lastfmPeriod?.toTimePeriod()
+            val from = lastfmTimePeriod?.start ?: input.timePeriod.start
+            val to = lastfmTimePeriod?.end ?: input.timePeriod.end
 
             Scrobblables.current
                 ?.getRecents(
                     1,
                     user.name,
                     from = from,
+                    to = to,
                     limit = 1
                 )
                 ?.getOrNull()?.attr?.total ?: 0
@@ -221,7 +222,7 @@ class ChartsVM(
             val t2 = System.currentTimeMillis()
 
             if (t2 - t1 > 50) { // probably not from cache
-                delay(400)
+                delay(400.milliseconds)
             }
 //            _tagCloudProgress.value = (++currentIndex).toFloat() / min(nArtists, artists.size)
         }

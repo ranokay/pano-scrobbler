@@ -13,8 +13,9 @@ import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.ModalBottomSheet
-import androidx.compose.material3.OutlinedIconButton
 import androidx.compose.material3.SheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -32,42 +33,47 @@ import androidx.navigation3.scene.OverlayScene
 import androidx.navigation3.scene.Scene
 import androidx.navigation3.scene.SceneStrategy
 import androidx.navigation3.scene.SceneStrategyScope
+import com.arn.scrobble.icons.ArrowBackAutoMirrored
 import com.arn.scrobble.icons.Close
 import com.arn.scrobble.icons.Icons
-import com.arn.scrobble.icons.automirrored.ArrowBack
-import com.arn.scrobble.navigation.BottomSheetSceneStrategy.Companion.bottomSheet
+import com.arn.scrobble.themes.LocalThemeAttributes
+import com.arn.scrobble.ui.ApplyWindowBlur
 import com.arn.scrobble.ui.isImeVisible
 import com.arn.scrobble.utils.PlatformStuff
+import com.arn.scrobble.utils.Stuff
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import pano_scrobbler.composeapp.generated.resources.Res
 import pano_scrobbler.composeapp.generated.resources.back
 import pano_scrobbler.composeapp.generated.resources.close
+import java.util.Objects
 
 // THANKS I HATE IT
 
-private data object BottomSheetKey : NavMetadataKey<Unit>
+private data object BottomSheetKey : NavMetadataKey<Boolean>
 
 /** An [OverlayScene] that renders an [entry] within a [ModalBottomSheet]. */
-internal data class BottomSheetScene<T : Any>(
+private class BottomSheetScene<T : Any>(
     override val key: T,
     override val previousEntries: List<NavEntry<T>>,
     override val overlaidEntries: List<NavEntry<T>>,
     private val entry: NavEntry<T>,
     private val sheetState: SheetState,
     private val onDismissRequest: () -> Unit,
+    private val sheetGesturesEnabled: Boolean,
     private val onBack: () -> Unit,
 ) : OverlayScene<T> {
+    private val canGoBack = previousEntries.lastOrNull()?.metadata?.get(BottomSheetKey) != null
 
     override val entries: List<NavEntry<T>> = listOf(entry)
 
     override val content: @Composable (() -> Unit) = {
         val lifecycleOwner = rememberLifecycleOwner()
-        val canGoBack = previousEntries.lastOrNull()?.metadata?.get(BottomSheetKey) != null
 
         BottomSheetDialogParent(
             sheetState = sheetState,
             onDismissRequest = onDismissRequest,
+            sheetGesturesEnabled = sheetGesturesEnabled,
             onBack = if (canGoBack) {
                 onBack
             } else {
@@ -79,18 +85,35 @@ internal data class BottomSheetScene<T : Any>(
             }
         }
     }
+
+    override suspend fun onRemove() {
+//        if (!canGoBack)
+//        sheetState.hide()
+    }
+
+    override fun equals(other: Any?): Boolean {
+        if (this === other) return true
+        if (other !is BottomSheetScene<*>) return false
+        return key == other.key &&
+                entry == other.entry &&
+                previousEntries == other.previousEntries &&
+                overlaidEntries == other.overlaidEntries
+    }
+
+    override fun hashCode(): Int =
+        Objects.hash(key, entry, previousEntries, overlaidEntries)
 }
 
 
 @Composable
-private fun BottomSheetDialogParent(
+fun BottomSheetDialogParent(
     sheetState: SheetState,
     onDismissRequest: () -> Unit,
     onBack: (() -> Unit)?,
+    sheetGesturesEnabled: Boolean = !PlatformStuff.isTv && !PlatformStuff.isDesktop,
     content: @Composable () -> Unit,
 ) {
     val scope = rememberCoroutineScope()
-    val sheetGesturesEnabled = !PlatformStuff.isTv && !PlatformStuff.isDesktop
     val isImeVisible = isImeVisible()
 
     ModalBottomSheet(
@@ -106,21 +129,29 @@ private fun BottomSheetDialogParent(
                     .add(WindowInsets(top = 42.dp))
             ),
     ) {
+        if (LocalThemeAttributes.current.blurSubWindow)
+            ApplyWindowBlur(behind = 0, bg = Stuff.BLUR_BACKDROP_RADIUS_DP)
+        // there can be only one window blur at a time per task, according to android source
+        // behind is already used by the main window, use bg to make them stack
+
+
         if (onBack != null) {
-            OutlinedIconButton(
+            IconButton(
+                shapes = IconButtonDefaults.shapes(),
                 onClick = onBack,
                 modifier = Modifier.padding(4.dp)
-                    .align(Alignment.CenterHorizontally),
+                    .align(Alignment.CenterHorizontally)
             ) {
                 Icon(
-                    imageVector = Icons.AutoMirrored.ArrowBack,
+                    imageVector = Icons.ArrowBackAutoMirrored,
                     contentDescription = stringResource(Res.string.back),
                 )
             }
 
         } else if (!sheetGesturesEnabled && !PlatformStuff.isTv) {
             // there isn't much vertical space on a TV
-            OutlinedIconButton(
+            IconButton(
+                shapes = IconButtonDefaults.shapes(),
                 onClick = {
                     scope.launch {
                         sheetState.hide()
@@ -128,7 +159,7 @@ private fun BottomSheetDialogParent(
                     }
                 },
                 modifier = Modifier.padding(4.dp)
-                    .align(Alignment.CenterHorizontally),
+                    .align(Alignment.CenterHorizontally)
             ) {
                 Icon(
                     imageVector = Icons.Close,
@@ -142,6 +173,7 @@ private fun BottomSheetDialogParent(
                     .height(24.dp)
             )
         }
+
         content()
     }
 }
@@ -154,31 +186,33 @@ private fun BottomSheetDialogParent(
  */
 class BottomSheetSceneStrategy<T : Any>(
     private val sheetState: SheetState,
-    private val onDismiss: () -> Unit
+    private val onDismiss: () -> Unit,
 ) : SceneStrategy<T> {
 
     override fun SceneStrategyScope<T>.calculateScene(entries: List<NavEntry<T>>): Scene<T>? {
         val lastEntry = entries.lastOrNull()
-        val isBottomSheet = lastEntry?.metadata?.get(BottomSheetKey) != null
+        val sheetGesturesEnabled = lastEntry?.metadata?.get(BottomSheetKey) ?: return null
 
-        return if (isBottomSheet)
-            @Suppress("UNCHECKED_CAST")
-            BottomSheetScene(
-                key = lastEntry.contentKey as T,
-                previousEntries = entries.dropLast(1),
-                overlaidEntries = entries.filterNot { it.metadata[BottomSheetKey] != null },
-                entry = lastEntry,
-                sheetState,
-                onDismissRequest = onDismiss,
-                onBack = onBack
-            )
-        else
-            null
+        @Suppress("UNCHECKED_CAST")
+        return BottomSheetScene(
+            key = lastEntry.contentKey as T,
+            previousEntries = entries.dropLast(1),
+            overlaidEntries = entries.filterNot { it.metadata[BottomSheetKey] != null },
+            entry = lastEntry,
+            sheetState,
+            onDismissRequest = onDismiss,
+            onBack = onBack,
+            sheetGesturesEnabled = sheetGesturesEnabled
+        )
     }
 
     companion object {
         fun bottomSheet() = metadata {
-            put(BottomSheetKey, Unit)
+            put(BottomSheetKey, !PlatformStuff.isTv && !PlatformStuff.isDesktop)
+        }
+
+        fun bottomSheetNoGestures() = metadata {
+            put(BottomSheetKey, false)
         }
     }
 }

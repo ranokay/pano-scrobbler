@@ -9,6 +9,7 @@ the background by default.
 
 - Settings > Apps > Background Autostart
 - App Info > Battery Saver > No restrictions
+- Lock the app in the background by opening the app switcher and tapping the lock icon
 - App Info > Force stop
 - Start the app again
 
@@ -19,11 +20,14 @@ The location of these settings will depend on your MIUI / HyperOS version
 - Search for "Never sleeping apps" in the system settings
 - Add the app to the list
 
-For other devices, go to [dontkillmyapp.com](https://dontkillmyapp.com), click on your mobile
-manufacturer's name on the site and follow all the steps in there.
+Go to [dontkillmyapp.com](https://dontkillmyapp.com), click on your mobile manufacturer's name on
+the site and follow all the steps in there.
 
 It may be impossible to use this app on a stock ROM from certain manufacturers, due to the said
 restrictions.
+
+Most custom ROMs and Pixel stock ROMs do not have such restrictions, and the app should work out of
+the box without changing any battery settings.
 
 ### [android] The app says that scrobbling is disabled
 
@@ -36,22 +40,33 @@ notifications from other apps.
 ### All of my scrobbles from Spotify are duplicated
 
 This happens if you have more than one scrobbler connected/running. Disable or uninstall other
-scrobblers. Disconnect your Spotify account from the last.fm website.
+scrobblers. Disconnect your Spotify account from the last.fm website,
+at [last.fm/settings/applications](https://www.last.fm/settings/applications)
 
 ### How do I scrobble only the first artist instead of all the performers?
 
-Go to Configure > Use the first artist only
+Go to Configure > Use the first artist only. Select the apps where you want this behavior.
 
 ### The app is scrobbling non music videos from YouTube
 
 Unfortunately there is no way to detect whether a video is a music video, from just the video title
-and the channel name, reported to the OS media controls. You may block certain channels from
-scrobbling or turn off YouTube scrobbling entirely, from settings.
+and the channel name, reported to the OS media controls. Use the dedicated YouTube Music app for
+music instead. You may block certain channels from scrobbling or turn off YouTube scrobbling
+entirely, from settings.
 
 ### I cannot edit scrobbles older than 14 days
 
 It is not possible to edit scrobbles older than 14 days using this app, regardless of whether you
 have a last.fm pro subscription, due to the method used for editing.
+
+### [desktop] Discord Rich Presence does not work
+
+- Check your activity privacy settings (Discord settings > Activity Privacy). "Share my activity"
+  should be enabled. Check if "Where I share activity" settings are correct.
+- Make sure that you are not invisible on Discord.
+- The native Discord desktop app, not the website version, must be running.
+- Discord should be running as the same user as Pano Scrobbler (e.g. do not run them as admin)
+- Do not add Pano Scrobbler as a game.
 
 ### Pictures of some artists are missing even though they have a picture on last.fm
 
@@ -71,8 +86,13 @@ image will be displayed.
 
 ### Certain tracks are being ignored
 
-Last.FM has a spam filter, which filters out tracks/albums/artists with titles similar to
+Last.FM has a filter, which filters out tracks/albums/artists with titles similar to
 "Unknown", ".mp3", "Track_01" etc
+
+### Scrobbles are going to a wrong artist or track with a similar spelling on last.fm
+
+Turn off the legacy artist and track corrections on the Last.fm website:
+[https://www.last.fm/settings/website](https://www.last.fm/settings/website)
 
 ### The scrobbler submits incomplete data / does not submit album artists
 
@@ -99,7 +119,8 @@ music player's app info and tap on "Clear defaults".
 ### [android] Where is the scrobble from mic feature?
 
 In-app scrobble from mic has been removed, in favor of scrobbling from Shazam/AutoShazam, Audile,
-Pixel's Now Playing or Ambient Music Mod.
+Ambient Music Mod and Pixel's Now Playing (before the March 2026 Pixel Feature Drop). Scrobbling the
+new Pixel Now Playing app is possible only with root and the Xposed module, Public Compute Services.
 
 ### [android] Where are the Tasker intents?
 
@@ -132,13 +153,13 @@ old versions of Android Go.
 - Run the following command in your terminal:
 - On Android 8.1 or higher:
 
-```
+```sh
 adb shell cmd notification allow_listener com.arn.scrobble/com.arn.scrobble.media.NLService
 ```
 
 - On Android 8.0 and lower:
 
-```
+```sh
 adb shell 'settings put secure enabled_notification_listeners $(settings get secure enabled_notification_listeners):com.arn.scrobble/com.arn.scrobble.media.NLService'
 ```
 
@@ -155,16 +176,18 @@ Use the `--data-dir` or `-d` command line argument, followed by the path to the 
 
 ### [desktop] How do I correctly scrobble media playing on a web browser?
 
-Browsers on Windows do not report the complete song metadata to the OS media controls. The situation
-is better on Linux, but depends on the website correctly reporting the metadata in their
-MediaSession. The same applies to browser-like apps (e.g. most Electron and WebView apps). Use
-WebScrobbler for web browsers, instead.
+The metadata reported to the OS media controls by web browsers depends on your browser and how the
+website has implemented their `MediaSession`. If you are on Windows, you must use Chrome v150 or
+higher, or other browsers based on Chromium v150+, as earlier versions do not report the album name
+at all. The situation is better on Linux, but still depends on the website correctly reporting the
+metadata. The same applies to browser-like apps (e.g. most Electron and WebView apps). For the best
+experience, use WebScrobbler on web browsers, instead.
 
 ### [desktop] The app does not show notifications on Windows
 
 To show notifications on Windows, the app's ID must be registered with the OS and linked to its
-start menu shortcut. This is done by the installer in install mode. So, it won't work if you
-are using it portable mode or have removed the start menu shortcut.
+start menu shortcut. This is done by the installer in install mode. So, it won't work if you are
+using it portable mode or have removed the start menu shortcut.
 
 ### The login WebView does not load [FAQ-wv]
 
@@ -172,20 +195,20 @@ Check if you have the required dependencies installed
 
 - Arch:
 
-```
-sudo pacman -S webkit2gtk-4.1
+```sh
+sudo pacman -S webkitgtk-6.0
 ```
 
 - Debian:
 
-```
-sudo apt install libwebkit2gtk-4.1-0
+```sh
+sudo apt install libwebkitgtk-6.0-4
 ```
 
 - Fedora:
 
-```
-sudo dnf install webkit2gtk4.1
+```sh
+sudo dnf install webkitgtk6.0
 ```
 
 - Windows: WebView2 provided by Microsoft Edge Chromium

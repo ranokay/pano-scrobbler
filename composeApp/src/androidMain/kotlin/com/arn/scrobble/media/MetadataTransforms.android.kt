@@ -1,9 +1,10 @@
 package com.arn.scrobble.media
 
 import android.media.MediaMetadata
-import android.os.Build
+import androidx.core.net.toUri
+import com.arn.scrobble.api.listenbrainz.ListenBrainz
+import com.arn.scrobble.utils.MetadataUtils
 import com.arn.scrobble.utils.Stuff
-import java.util.Locale
 
 actual typealias PlatformMediaMetadata = MediaMetadata
 
@@ -17,10 +18,29 @@ actual fun transformMediaMetadata(
     var album = metadata.getString(MediaMetadata.METADATA_KEY_ALBUM)?.trim() ?: ""
     var title = metadata.getString(MediaMetadata.METADATA_KEY_TITLE)?.trim() ?: ""
     val trackNumber = metadata.getLong(MediaMetadata.METADATA_KEY_TRACK_NUMBER).toInt()
-//    val artUrl = metadata.getString(MediaMetadata.METADATA_KEY_ART_URI)?.trim() ?: ""
+    // only remote images, used for the Discord Rich Presence
+    val artUrl = arrayOf(
+        MediaMetadata.METADATA_KEY_ART_URI,
+        MediaMetadata.METADATA_KEY_ALBUM_ART_URI,
+        MediaMetadata.METADATA_KEY_DISPLAY_ICON_URI,
+    ).firstNotNullOfOrNull { key ->
+        metadata.getString(key)?.trim()?.let(::toRemoteImageUrl)
+    }
     var durationMillis = metadata.getLong(MediaMetadata.METADATA_KEY_DURATION)
     if (durationMillis < -1 || trackInfo.appId in Stuff.IGNORE_DURATION)
         durationMillis = -1
+
+    val extraTags = mutableMapOf<String, String>()
+
+    metadata.keySet()
+        .filter {
+            it in ListenBrainz.MUSICBRAINZ_KEY_SET
+        }
+        .forEach { key ->
+            metadata.getString(key)?.ifEmpty { null }?.let { value ->
+                extraTags[key] = value
+            }
+        }
 
 //    metadata.getLong(Stuff.METADATA_KEY_YOUTUBE_WIDTH).takeIf { it != 0L }
 //        ?.let { extrasMap[Stuff.METADATA_KEY_YOUTUBE_WIDTH] = it.toString() }
@@ -48,11 +68,20 @@ actual fun transformMediaMetadata(
                 artist = artist.take(idx)
         }
 
-        Stuff.PACKAGE_SONOS,
-        Stuff.PACKAGE_SONOS2,
-            -> {
+        Stuff.PACKAGE_SONOS -> {
             metadata.getString(MediaMetadata.METADATA_KEY_COMPOSER)?.let {
                 artist = it
+                albumArtist = ""
+            }
+        }
+
+        Stuff.PACKAGE_SONOS2 -> {
+            // https://github.com/kawaiiDango/pano-scrobbler/issues/909
+
+            val parts = artist.split(" • ")
+            if (parts.size >= 2) {
+                artist = parts[0]
+                album = parts[1]
                 albumArtist = ""
             }
         }
@@ -67,13 +96,10 @@ actual fun transformMediaMetadata(
         }
 
         Stuff.PACKAGE_HUAWEI_MUSIC -> {
-            if (Build.MANUFACTURER.lowercase(Locale.ENGLISH) == Stuff.MANUFACTURER_HUAWEI) {
-                // Extra check for the manufacturer, because 'com.android.mediacenter' could match other music players.
-                val extra = " - $album"
-                if (artist.endsWith(extra))
-                    artist = artist.dropLast(extra.length)
-                albumArtist = ""
-            }
+            val extra = " - $album"
+            if (artist.endsWith(extra))
+                artist = artist.dropLast(extra.length)
+            albumArtist = ""
         }
 
         Stuff.PACKAGE_YANDEX_MUSIC -> {
@@ -121,6 +147,16 @@ actual fun transformMediaMetadata(
          */
     }
 
+    var ignoreScrobble = metadata.getLong(METADATA_KEY_ADVERTISEMENT) != 0L
+
+    if (("|TelegramMediaSession" in trackInfo.notiKey || "|telegramAudioPlayer" in trackInfo.notiKey) &&
+        MetadataUtils.isTgVoiceMessage(artist) &&
+        artist == albumArtist &&
+        album.isEmpty()
+    ) {
+        ignoreScrobble = true
+    }
+
 //    if (trackInfo.appId in Stuff.IGNORE_ARTIST_META)
 //        trackInfo.artist = trackInfo.artist.substringBeforeLast(" - Topic")
 
@@ -137,13 +173,31 @@ actual fun transformMediaMetadata(
         albumArtist = albumArtist,
         trackNumber = trackNumber,
         duration = durationMillis,
-        artUrl = null,
+        artUrl = artUrl,
         normalizedUrlHost = null,
+        extraTags = extraTags
     )
 
-    val ignoreScrobble = metadata.getLong(METADATA_KEY_ADVERTISEMENT) != 0L
-
     return metadataInfo to ignoreScrobble
+}
+
+/**
+ * from bl4zee1g's fork
+ * Accepts https urls, and unwraps content:// urls from image proxy providers
+ * that carry the original location in the _HOST_ and _PROTOCOL_ query params,
+ * like content://com.soundcloud.android.imageProvider/a/b.jpg?_HOST_=i1.sndcdn.com&_PROTOCOL_=https
+ */
+
+private fun toRemoteImageUrl(uriString: String): String? {
+    if (uriString.startsWith("https://")) return uriString
+
+    val uri = uriString.toUri()
+    if (uri.scheme != "content") return null
+
+    val host = uri.getQueryParameter("_HOST_")?.takeIf { it.isNotEmpty() } ?: return null
+    if (uri.getQueryParameter("_PROTOCOL_") != "https") return null
+
+    return "https://$host${uri.encodedPath.orEmpty()}"
 }
 
 private const val METADATA_KEY_ADVERTISEMENT = "android.media.metadata.ADVERTISEMENT"

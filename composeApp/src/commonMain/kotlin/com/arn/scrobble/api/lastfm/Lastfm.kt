@@ -1,5 +1,6 @@
 package com.arn.scrobble.api.lastfm
 
+import co.touchlab.kermit.Logger
 import com.arn.scrobble.api.AccountType
 import com.arn.scrobble.api.DrawerData
 import com.arn.scrobble.api.Requesters
@@ -50,6 +51,7 @@ import java.math.BigInteger
 import java.security.MessageDigest
 import java.util.Calendar
 import java.util.TreeMap
+import kotlin.time.Duration.Companion.seconds
 
 open class LastFm(userAccount: UserAccountSerializable) : Scrobblable(userAccount) {
     class CookiesInvalidatedException(override val message: String) :
@@ -58,7 +60,7 @@ open class LastFm(userAccount: UserAccountSerializable) : Scrobblable(userAccoun
     protected open val apiKey = Requesters.lastfmUnauthedRequester.apiKey
     protected open val apiSecret = Requesters.lastfmUnauthedRequester.apiSecret
 
-    private val apiRoot = when (userAccount.type) {
+    protected val apiRoot = when (userAccount.type) {
         AccountType.LASTFM -> Stuff.LASTFM_API_ROOT
         AccountType.LIBREFM -> Stuff.LIBREFM_API_ROOT
         else -> userAccount.apiRoot!!
@@ -293,7 +295,7 @@ open class LastFm(userAccount: UserAccountSerializable) : Scrobblable(userAccoun
                 artistCount = user.artist_count ?: 0,
                 albumCount = user.album_count ?: 0,
                 trackCount = user.track_count ?: 0,
-                profilePicUrl = user.webp300
+                profilePicUrl = user.image?.medium
             )
         }
     }
@@ -589,8 +591,11 @@ open class LastFm(userAccount: UserAccountSerializable) : Scrobblable(userAccoun
                 if (response.status == HttpStatusCode.OK) {
                     val success = response.parseJsonBody<DeleteScrobbleResponse>().result
 
-                    if (!success)
-                        throw IllegalStateException("LastfmUnscrobbler: error unscrobbling")
+                    // seems to return {"result": true} even for things that were already deleted
+                    if (!success) {
+                        Logger.e { "LastfmUnscrobbler: error unscrobbling" }
+                        throw CookiesInvalidatedException(getString(Res.string.lastfm_reauth))
+                    }
                 } else if (response.status == HttpStatusCode.Forbidden) {
                     cookieStorage.clear()
                     throw CookiesInvalidatedException(getString(Res.string.lastfm_reauth))
@@ -602,7 +607,7 @@ open class LastFm(userAccount: UserAccountSerializable) : Scrobblable(userAccoun
                 }
 
                 // add a random delay to prevent 406 error
-                delay((1000L..10000L).random())
+                delay((5..10).random().seconds)
             }
 
         private const val COOKIE_CSRFTOKEN = "csrftoken"
@@ -675,13 +680,13 @@ open class LastFm(userAccount: UserAccountSerializable) : Scrobblable(userAccoun
 
             val apiRoot = userAccountTemp.apiRoot ?: Stuff.LASTFM_API_ROOT
 
-            val session = Requesters.lastfmUnauthedRequester.getSession(
+            return Requesters.lastfmUnauthedRequester.getSession(
                 apiRoot,
                 apiKey,
                 apiSecret,
                 userAccountTemp.authKey
-            ).onSuccess {
-                // store cookies
+            ).mapCatching { session ->
+                // store lastfm cookies
 
                 val lastfmUrl = Url(Stuff.LASTFM_URL)
 
@@ -695,23 +700,35 @@ open class LastFm(userAccount: UserAccountSerializable) : Scrobblable(userAccoun
                     parameter("method", "user.getInfo")
                     parameter("format", "json")
                     parameter("api_key", apiKey)
-                    parameter("sk", it.key)
-                    parameter("user", it.name)
-                }.map { it.user }
+                    parameter("sk", session.key)
+                    parameter("user", session.name)
+                }
+                    .map { it.user.toUserCached() }
+                    .recover {
+                        // if fetching user info fails, create a user with just the name
+                        val username = session.name ?: "user"
+                        UserCached(
+                            username,
+                            "$apiRoot/user/$username",
+                            username,
+                            "",
+                            -1,
+                        )
+                    }
                     .onSuccess { user ->
                         // save account
                         val account = UserAccountSerializable(
                             userAccountTemp.type,
-                            user.toUserCached(),
-                            it.key,
+                            user,
+                            session.key,
                             userAccountTemp.apiRoot,
                         )
 
                         Scrobblables.add(account)
                     }
-            }
 
-            return session
+                session
+            }
         }
     }
 }

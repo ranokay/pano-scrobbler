@@ -6,7 +6,6 @@ all_out
 api
 apps
 arrow_drop_down
-arrow_drop_down_circle
 arrow_upward
 auto_awesome_mosaic
 automation
@@ -37,6 +36,8 @@ favorite
 fiber_manual_record
 find_replace
 folder
+fullscreen
+fullscreen_exit
 graphic_eq
 grid_view
 group
@@ -51,9 +52,11 @@ keyboard_arrow_up
 keyboard_double_arrow_down
 keyboard_double_arrow_up
 lock
+logout
 match_case
 menu
 mic
+minimize
 more_horiz
 more_vert
 music_note
@@ -77,6 +80,7 @@ stop
 swap_vert
 swipe_left_alt
 tag
+timer
 today
 toggle_off
 toggle_on

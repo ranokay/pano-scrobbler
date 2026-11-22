@@ -3,6 +3,7 @@ package com.arn.scrobble.media
 import android.annotation.SuppressLint
 import android.media.AudioManager
 import android.media.MediaMetadata
+import android.media.Rating
 import android.media.session.MediaController
 import android.media.session.MediaSessionManager.OnActiveSessionsChangedListener
 import android.media.session.PlaybackState
@@ -10,6 +11,8 @@ import android.os.Build
 import android.os.Bundle
 import co.touchlab.kermit.Logger
 import com.arn.scrobble.BuildKonfig
+import com.arn.scrobble.api.ScrobbleEverywhere
+import com.arn.scrobble.billing.LicenseState
 import com.arn.scrobble.media.PlayerActions.love
 import com.arn.scrobble.media.PlayerActions.unlove
 import com.arn.scrobble.utils.AndroidStuff
@@ -19,15 +22,20 @@ import com.arn.scrobble.utils.PanoNotifications
 import com.arn.scrobble.utils.PlatformStuff
 import com.arn.scrobble.utils.Stuff
 import com.arn.scrobble.utils.Stuff.stateInWithCache
+import com.arn.scrobble.utils.VariantStuff
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNot
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.getString
 import pano_scrobbler.composeapp.generated.resources.Res
 import pano_scrobbler.composeapp.generated.resources.mute
 import pano_scrobbler.composeapp.generated.resources.skip
+import java.util.Objects
 
 class SessListener(
     scope: CoroutineScope,
@@ -38,12 +46,9 @@ class SessListener(
         AndroidStuff.applicationContext.getSystemService(AudioManager::class.java)!!
     }
 
-    override val notifyTimelineUpdates = false
+    override val notifyTimelineUpdates = true
     private val mainPrefs = PlatformStuff.mainPrefs
     private var platformControllers = emptyList<MediaController>()
-
-    private val scrobbleSpotifyRemote =
-        mainPrefs.data.stateInWithCache(scope) { it.scrobbleSpotifyRemoteP }
 
     private val autoDetectApps =
         mainPrefs.data.stateInWithCache(scope) { it.autoDetectApps }
@@ -58,19 +63,23 @@ class SessListener(
     init {
         scope.launch {
             combine(
+                scrobblerEnabled, // also done in NLService
                 allowedPackages,
                 blockedPackages,
                 autoDetectApps,
-//                scrobblerEnabled, // now done directly in NLService
-            ) { allowed, blocked, autoDetect ->
-                onActiveSessionsChanged(platformControllers)
-                val tokensToKeep = sessionTrackers
-                    .filter { (k, v) ->
-                        shouldScrobble(v.trackInfo.appId)
-                    }
-                    .keys
-                removeSessions(tokensToKeep)
-            }.collect()
+            ) { scrobblerEnabled, allowed, blocked, autoDetect ->
+                Objects.hash(scrobblerEnabled, allowed, blocked, autoDetect)
+            }
+                .distinctUntilChanged()
+                .collect {
+                    onActiveSessionsChanged(platformControllers)
+                    val tokensToKeep = sessionTrackers
+                        .filter { (k, v) ->
+                            shouldScrobble(v.trackInfo.appId)
+                        }
+                        .keys
+                    removeSessions(tokensToKeep)
+                }
         }
     }
 
@@ -193,9 +202,12 @@ class SessListener(
         ) && !metadata?.getString(MediaMetadata.METADATA_KEY_TITLE).isNullOrEmpty()
 
     inner class AndroidSessionTracker(
-        val controller: MediaController,
+        private val controller: MediaController,
         trackInfo: PlayingTrackInfo,
-    ) : SessionTracker(trackInfo) {
+    ) : SessionTracker(controller.sessionToken, trackInfo) {
+
+        private var lastRating: Rating? = null
+        private var ratingChangedTo: Boolean? = null
 
         override fun skip() {
             controller.transportControls.skipToNext()
@@ -216,6 +228,61 @@ class SessListener(
         override fun stop() {
             pause()
             controller.unregisterCallback(callback)
+        }
+
+        override fun onBeforeScrobble() {
+            if (trackInfo.appId !in allowedPackages.value) {
+                scope.launch {
+                    PanoNotifications.notifyAppDetected(
+                        trackInfo.appId,
+                        PlatformStuff.loadApplicationLabel(trackInfo.appId)
+                    )
+                }
+            }
+        }
+
+        // null = take no action
+        private fun Rating.toBool(): Boolean? {
+            return when (ratingStyle) {
+                Rating.RATING_THUMB_UP_DOWN -> isThumbUp
+
+                Rating.RATING_HEART -> hasHeart()
+
+                Rating.RATING_3_STARS -> starRating == 3f
+
+                Rating.RATING_4_STARS -> starRating == 4f
+
+                Rating.RATING_5_STARS -> starRating >= 4f
+
+                Rating.RATING_PERCENTAGE -> percentRating >= 80f
+
+                else -> null
+            }
+        }
+
+        override fun checkRatingChanged(trackIsSame: Boolean) {
+            val ratingEvent = ratingChangedTo.takeIf { trackIsSame && it != null }
+
+            if (ratingEvent != null && (trackInfo.userLovedMayEcho && trackInfo.userLoved != ratingEvent || !trackInfo.userLovedMayEcho)) {
+                Logger.d { "ratingEvent=$ratingEvent" }
+                Stuff.appScope.launch(Dispatchers.IO) {
+                    val linkRatingToLoved =
+                        VariantStuff.billingRepository.licenseState.filterNot { it == LicenseState.VALID }
+                            .first() == LicenseState.VALID
+                                && PlatformStuff.mainPrefs.data.map { it.linkRatingToLoved }.first()
+                    if (linkRatingToLoved) {
+                        trackInfo.loved(userLoved = ratingEvent, mayEcho = false)
+                        val trackPlaying = trackInfo.toTrackPlayingEvent()
+                        ScrobbleEverywhere.loveOrUnlove(
+                            trackPlaying.scrobbleData.toTrack().copy(msid = trackPlaying.msid),
+                            ratingEvent
+                        )
+                        globalTrackEventFlow.emit(trackPlaying)
+                    }
+                }
+            } else {
+                Logger.d { "ratingEvent=$ratingEvent, skipping" }
+            }
         }
 
         val callback = object : MediaController.Callback() {
@@ -241,6 +308,15 @@ class SessListener(
 
                 val (metadataInfo, ignoreScrobble) = transformMediaMetadata(trackInfo, metadata)
 
+                val rating = metadata.getRating(MediaMetadata.METADATA_KEY_USER_RATING)
+
+                // Rating does not override equals
+                ratingChangedTo = if (rating?.toBool() != lastRating?.toBool())
+                    rating?.toBool()
+                else
+                    null
+                lastRating = rating
+
                 metadataChanged(metadataInfo, ignoreScrobble)
             }
 
@@ -248,13 +324,10 @@ class SessListener(
             override fun onPlaybackStateChanged(state: PlaybackState?) {
                 state ?: return
 
-                val options = TransformMetadataOptions(
-                    scrobbleSpotifyRemote = scrobbleSpotifyRemote.value
-                )
                 val (playbackInfo, ignoreScrobble) = transformPlaybackState(
                     trackInfo,
                     state,
-                    options
+                    scrobbleSpotifyRemote.value
                 )
 
                 playbackStateChanged(playbackInfo, ignoreScrobble)

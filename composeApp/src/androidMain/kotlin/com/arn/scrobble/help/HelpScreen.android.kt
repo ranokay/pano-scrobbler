@@ -1,18 +1,10 @@
 package com.arn.scrobble.help
 
 import android.os.Build
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.AlertDialog
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
-import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.SplitButtonDefaults
 import androidx.compose.material3.SplitButtonLayout
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -20,22 +12,21 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import com.arn.scrobble.icons.Check
+import com.arn.scrobble.icons.ArrowDropDown
 import com.arn.scrobble.icons.Icons
-import com.arn.scrobble.icons.KeyboardArrowDown
+import com.arn.scrobble.ui.AlertDialogOk
+import com.arn.scrobble.ui.PanoDropdownMenu
 import com.arn.scrobble.utils.AndroidStuff
 import com.arn.scrobble.utils.PlatformStuff
 import com.arn.scrobble.utils.Stuff.collectAsStateWithInitialValue
 import org.jetbrains.compose.resources.stringResource
 import pano_scrobbler.composeapp.generated.resources.Res
-import pano_scrobbler.composeapp.generated.resources.affect_performance
 import pano_scrobbler.composeapp.generated.resources.copy
 import pano_scrobbler.composeapp.generated.resources.exit_reasons
 import pano_scrobbler.composeapp.generated.resources.log_to_file
 import pano_scrobbler.composeapp.generated.resources.more
 import pano_scrobbler.composeapp.generated.resources.save_logs
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 actual fun HelpSaveLogsButton(
     showFilePicker: () -> Unit,
@@ -67,25 +58,14 @@ actual fun HelpSaveLogsButton(
             ) {
                 Text(stringResource(Res.string.save_logs))
 
-                DropdownMenu(
+                PanoDropdownMenu(
                     expanded = menuShown,
                     onDismissRequest = { menuShown = false },
                 ) {
-                    DropdownMenuItem(
-                        checkedLeadingIcon = {
-                            Icon(
-                                imageVector = Icons.Check,
-                                contentDescription = null,
-                            )
-                        },
+                    checkableItem(
                         text = {
-                            Text(
-                                stringResource(Res.string.log_to_file) + "\n" +
-                                        "(" + stringResource(Res.string.affect_performance) + ")"
-
-                            )
+                            Text(stringResource(Res.string.log_to_file))
                         },
-                        shapes = MenuDefaults.itemShapes(),
                         checked = logToFile,
                         onCheckedChange = {
                             newCheckedState = it
@@ -93,7 +73,7 @@ actual fun HelpSaveLogsButton(
                     )
 
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        DropdownMenuItem(
+                        item(
                             text = {
                                 Text(stringResource(Res.string.exit_reasons))
                             },
@@ -114,7 +94,7 @@ actual fun HelpSaveLogsButton(
                 checked = menuShown,
             ) {
                 Icon(
-                    imageVector = Icons.KeyboardArrowDown,
+                    imageVector = Icons.ArrowDropDown,
                     contentDescription = stringResource(Res.string.more),
                 )
             }
@@ -132,24 +112,16 @@ actual fun HelpSaveLogsButton(
         }
 
         if (exitReasonsText != null) {
-            AlertDialog(
-                text = {
-                    Text(
-                        text = exitReasonsText,
-                        modifier = Modifier.verticalScroll(rememberScrollState())
-                    )
-                },
+            AlertDialogOk(
+                text = exitReasonsText,
+                confirmText = stringResource(Res.string.copy),
+                scrollable = true,
                 onDismissRequest = {
                     exitReasonsShown = false
                 },
-                confirmButton = {
-                    TextButton(
-                        onClick = {
-                            PlatformStuff.copyToClipboard(exitReasonsText)
-                        }
-                    ) {
-                        Text(text = stringResource(Res.string.copy))
-                    }
+                onConfirmation = {
+                    PlatformStuff.copyToClipboard(exitReasonsText)
+                    exitReasonsShown = false
                 }
             )
         }

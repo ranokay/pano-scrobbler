@@ -7,6 +7,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -24,14 +25,14 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
-import com.arn.scrobble.navigation.enumSaver
-import com.arn.scrobble.ui.ButtonWithSpinner
+import com.arn.scrobble.ui.ButtonWithDropdown
 import com.arn.scrobble.ui.ErrorText
 import com.arn.scrobble.ui.FilePicker
 import com.arn.scrobble.ui.FilePickerMode
 import com.arn.scrobble.ui.FileType
 import com.arn.scrobble.ui.LabeledCheckbox
 import com.arn.scrobble.ui.PanoSnackbarVisuals
+import com.arn.scrobble.utils.LocalNetworkPermissionsRequest
 import com.arn.scrobble.utils.PlatformStuff
 import com.arn.scrobble.utils.Stuff
 import com.arn.scrobble.utils.redactedMessage
@@ -119,7 +120,7 @@ fun ImportScreen(
                 var canStartServer by rememberSaveable { mutableStateOf(false) }
 
                 if (!canStartServer) {
-                    ImportScreenPermissionsRequest(onGranted = {
+                    LocalNetworkPermissionsRequest(onGranted = {
                         canStartServer = true
                     }, onDenied = {
                         errorText = missingPermText
@@ -158,7 +159,7 @@ fun ImportScreen(
                 )
 
                 if (canStartServer && serverAddress != null) {
-                    ButtonWithSpinner(
+                    ButtonWithDropdown(
                         prefixText = "IP",
                         itemToTexts = remember {
                             viewModel.localIps.associateWith { it }
@@ -181,7 +182,7 @@ fun ImportScreen(
             var userImportTypes by remember(availableImportTypes) {
                 mutableStateOf(availableImportTypes ?: emptySet())
             }
-            var selectedWriteMode by rememberSaveable(saver = enumSaver()) {
+            var selectedWriteMode by rememberSaveable {
                 mutableStateOf(
                     ImExporter.WriteMode.keep_existing
                 )
@@ -246,7 +247,7 @@ fun ImportScreen(
                     ImExporter.ImportTypes.blocked_metadata in userImportTypes ||
                     ImExporter.ImportTypes.artists_with_delimiters in userImportTypes
                 ) {
-                    ButtonWithSpinner(
+                    ButtonWithDropdown(
                         prefixText = null,
                         itemToTexts = writeModesMap,
                         selected = selectedWriteMode,
@@ -257,6 +258,7 @@ fun ImportScreen(
                 Spacer(modifier = Modifier.height(16.dp))
 
                 OutlinedButton(
+                    shapes = ButtonDefaults.shapes(),
                     onClick = {
                         viewModel.import(userImportTypes, selectedWriteMode)
                     },
@@ -300,9 +302,3 @@ fun ImportScreen(
         viewModel.setPlatformFile(it)
     }
 }
-
-@Composable
-expect fun ImportScreenPermissionsRequest(
-    onGranted: () -> Unit,
-    onDenied: () -> Unit,
-)

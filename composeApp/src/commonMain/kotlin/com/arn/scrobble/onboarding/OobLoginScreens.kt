@@ -3,10 +3,10 @@ package com.arn.scrobble.onboarding
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.text.input.rememberTextFieldState
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularWavyProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -40,7 +40,6 @@ import pano_scrobbler.composeapp.generated.resources.pref_imexport_code
 import pano_scrobbler.composeapp.generated.resources.retry
 
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun OobLastfmLibrefmLoginScreen(
     userAccountTemp: UserAccountTemp,
@@ -125,6 +124,7 @@ fun OobLastfmLibrefmLoginScreen(
 
             if (token != null) {
                 OutlinedButton(
+                    shapes = ButtonDefaults.shapes(),
                     onClick = {
                         viewModel.lastfmOobLogin(
                             userAccountTemp,
@@ -151,10 +151,10 @@ fun OobPleromaLoginScreen(
     modifier: Modifier = Modifier,
     viewModel: LoginViewModel = viewModel { LoginViewModel() },
 ) {
-    var code by rememberSaveable { mutableStateOf("") }
+    val code = rememberTextFieldState()
     val result by viewModel.result.collectAsStateWithLifecycle(null)
     val onSubmit = {
-        viewModel.pleromaLogin(userAccountTemp, pleromaCreds, code)
+        viewModel.pleromaLogin(userAccountTemp, pleromaCreds, code.text.toString())
     }
 
     LaunchedEffect(Unit) {
@@ -166,21 +166,19 @@ fun OobPleromaLoginScreen(
         modifier = modifier
     ) {
         PanoOutlinedTextField(
-            modifier = Modifier.fillMaxWidth(),
-            value = code,
+            code,
             singleLine = true,
-            onValueChange = { code = it },
             label = { Text(stringResource(Res.string.pref_imexport_code)) },
             keyboardOptions = KeyboardOptions(
                 keyboardType = KeyboardType.Text,
                 capitalization = KeyboardCapitalization.None,
                 imeAction = ImeAction.Done
             ),
-            keyboardActions = KeyboardActions(
-                onDone = {
-                    onSubmit()
-                }
-            )
+            onKeyboardAction = { performDefaultAction ->
+                onSubmit()
+                performDefaultAction()
+            },
+            modifier = Modifier.fillMaxWidth(),
         )
 
         VerifyButton(

@@ -23,11 +23,14 @@ interface PendingScrobblesDao {
     @Query("SELECT * FROM $tableName ORDER BY timestamp DESC LIMIT :limit")
     fun allFlow(limit: Int): Flow<List<PendingScrobble>>
 
-    @Query("SELECT * FROM $tableName WHERE event = 'scrobble' ORDER BY timestamp DESC LIMIT :limit")
-    suspend fun allScrobbles(limit: Int): List<PendingScrobble>
+    @Query("SELECT * FROM $tableName WHERE event = 'scrobble' ORDER BY timestamp ASC LIMIT :limit")
+    suspend fun allScrobblesForSubmission(limit: Int): List<PendingScrobble>
 
-    @Query("SELECT * FROM $tableName WHERE event != 'scrobble' ORDER BY timestamp DESC LIMIT :limit")
-    suspend fun allLoves(limit: Int): List<PendingScrobble>
+    @Query("SELECT * FROM $tableName WHERE event != 'scrobble' ORDER BY timestamp ASC LIMIT :limit")
+    suspend fun allLovesForSubmission(limit: Int): List<PendingScrobble>
+
+    @Query("SELECT * FROM $tableName WHERE lastFailedTimestamp IS NOT NULL ORDER BY lastFailedTimestamp DESC LIMIT 1")
+    fun lastErrored(): Flow<PendingScrobble?>
 
     @Query("SELECT count(1) FROM $tableName")
     suspend fun count(): Int
@@ -85,7 +88,7 @@ interface PendingScrobblesDao {
 
     @Query("SELECT 1 FROM $tableName WHERE canForceRetry = 1 OR lastFailedTimestamp <= :retryAfterTimestamp")
     suspend fun canForceRetry(
-        retryAfterTimestamp: Long = System.currentTimeMillis() - 30 * 60 * 1000L
+        retryAfterTimestamp: Long = System.currentTimeMillis() - 60 * 60 * 1000L
     ): Boolean
 
     @Delete

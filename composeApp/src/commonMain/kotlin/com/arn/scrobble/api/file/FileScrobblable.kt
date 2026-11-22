@@ -16,6 +16,12 @@ import com.arn.scrobble.api.lastfm.PageResult
 import com.arn.scrobble.api.lastfm.ScrobbleData
 import com.arn.scrobble.api.lastfm.Track
 import com.arn.scrobble.api.lastfm.User
+import com.arn.scrobble.api.listenbrainz.ListenBrainz.Companion.ISRC
+import com.arn.scrobble.api.listenbrainz.ListenBrainz.Companion.MUSICBRAINZ_ALBUMID
+import com.arn.scrobble.api.listenbrainz.ListenBrainz.Companion.MUSICBRAINZ_ARTISTID
+import com.arn.scrobble.api.listenbrainz.ListenBrainz.Companion.MUSICBRAINZ_RELEASEGROUPID
+import com.arn.scrobble.api.listenbrainz.ListenBrainz.Companion.MUSICBRAINZ_RELEASETRACKID
+import com.arn.scrobble.api.listenbrainz.ListenBrainz.Companion.MUSICBRAINZ_TRACKID
 import com.arn.scrobble.charts.ListeningActivity
 import com.arn.scrobble.charts.TimePeriod
 import com.arn.scrobble.ui.PackageName
@@ -23,13 +29,14 @@ import com.arn.scrobble.ui.PackageNameMetadata.englishLabel
 import com.arn.scrobble.ui.PackageNameMetadata.version
 import com.arn.scrobble.utils.PanoTimeFormatter
 import com.arn.scrobble.utils.PlatformFile
-import com.github.doyaaaaaken.kotlincsv.dsl.csvReader
-import com.github.doyaaaaaken.kotlincsv.dsl.csvWriter
+import com.arn.scrobble.utils.Stuff
+import com.jsoizo.kotlincsv.csvReader
+import com.jsoizo.kotlincsv.csvWriter
+import com.jsoizo.kotlincsv.writer.write
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
-import kotlinx.serialization.json.Json
 import java.io.IOException
 import java.io.OutputStream
 
@@ -83,7 +90,7 @@ class FileScrobblable(userAccount: UserAccountSerializable) : Scrobblable(userAc
         when (fileType) {
             FileFormat.csv -> {
                 withContext(Dispatchers.IO) {
-                    csvWriter.writeAllAsync(listOf(entry.toCsvRow()), outputStream)
+                    csvWriter.write(listOf(entry.toCsvRow()), outputStream)
                 }
             }
 
@@ -276,7 +283,7 @@ class FileScrobblable(userAccount: UserAccountSerializable) : Scrobblable(userAc
                             try {
                                 val entry = Entry.fromJson(line)
                                 val row = entry.toCsvRow()
-                                val convertedLine = csvWriter.writeAllAsString(listOf(row))
+                                val convertedLine = csvWriter.writeAll(listOf(row))
 
                                 outputStream.write(convertedLine.toByteArray())
                             } catch (e: SerializationException) {
@@ -293,6 +300,7 @@ class FileScrobblable(userAccount: UserAccountSerializable) : Scrobblable(userAc
     private data class Entry(
         val timeHuman: String,
         val timeMs: Long,
+        val event: ScrobbleEvent,
         val artist: String,
         val track: String,
         val album: String?,
@@ -301,26 +309,32 @@ class FileScrobblable(userAccount: UserAccountSerializable) : Scrobblable(userAc
         val mediaPlayerPackage: String? = null,
         val mediaPlayerName: String? = null,
         val mediaPlayerVersion: String? = null,
-        val event: ScrobbleEvent,
+        val recordingMbid: String? = null,
+        val releaseMbid: String? = null,
+        val artistMbids: String? = null, // delimiter separated string
+        val releaseGroupMbid: String? = null,
+        val trackMbid: String? = null,
+        val isrc: String? = null,
     ) {
-        fun toJson() = Json.encodeToString(this)
+        fun toJson() = Stuff.myJson.encodeToString(this)
 
+        // todo add the new fields to csv
         fun toCsvRow() = listOf(
             timeHuman,
             timeMs.toString(),
             artist,
             track,
-            album,
-            albumArtist,
+            album.orEmpty(),
+            albumArtist.orEmpty(),
             durationMs.toString(),
-            mediaPlayerPackage,
-            mediaPlayerName,
-            mediaPlayerVersion,
+            mediaPlayerPackage.orEmpty(),
+            mediaPlayerName.orEmpty(),
+            mediaPlayerVersion.orEmpty(),
             event.name
         )
 
         companion object {
-            fun fromJson(json: String) = Json.decodeFromString<Entry>(json)
+            fun fromJson(json: String) = Stuff.myJson.decodeFromString<Entry>(json)
 
             fun fromCsvRow(row: List<String>) = Entry(
                 timeHuman = row[0],
@@ -347,6 +361,13 @@ class FileScrobblable(userAccount: UserAccountSerializable) : Scrobblable(userAc
                 mediaPlayerPackage = scrobbleData.appId,
                 mediaPlayerName = scrobbleData.appId?.let { PackageName(it).englishLabel },
                 mediaPlayerVersion = scrobbleData.appId?.let { PackageName(it).version },
+                recordingMbid = scrobbleData.extraTags[MUSICBRAINZ_TRACKID],
+                releaseMbid = scrobbleData.extraTags[MUSICBRAINZ_ALBUMID],
+                // is multi-value
+                artistMbids = scrobbleData.extraTags[MUSICBRAINZ_ARTISTID],
+                releaseGroupMbid = scrobbleData.extraTags[MUSICBRAINZ_RELEASEGROUPID],
+                trackMbid = scrobbleData.extraTags[MUSICBRAINZ_RELEASETRACKID],
+                isrc = scrobbleData.extraTags[ISRC],
                 event = event
             )
         }
@@ -403,6 +424,7 @@ class FileScrobblable(userAccount: UserAccountSerializable) : Scrobblable(userAc
                 )
 
                 Scrobblables.add(account)
+
                 account
             }
         }

@@ -2,7 +2,7 @@ name: Generate F-droid repo and static site
 
 on:
   repository_dispatch:
-    types: [static_site]
+    types: [ static_site ]
   workflow_dispatch:
 
 # Sets permissions of the GITHUB_TOKEN to allow deployment to GitHub Pages
@@ -27,27 +27,15 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v6
-
-#      - name: Create basic directory structure
-#        run: mkdir -p fdroid/repo
-
-      - name: Restore correct mtime
-        run: |
-          sudo apt install git-restore-mtime 
-          git restore-mtime
-
-#      - name: Install F-Droid server software
-#        run: |
-#         sudo add-apt-repository ppa:fdroid/fdroidserver
-#         sudo apt-get update
-#         sudo apt-get install fdroidserver
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Install F-Droid server software
         run: |
-         sudo apt-get update
-         sudo apt-get install python3-pip
-         pip install fdroidserver --break-system-packages
+          sudo apt-get update
+          sudo apt-get install python3-pip
+          pip install fdroidserver --break-system-packages
 
       - name: Set up repo secrets
         run: |
@@ -58,18 +46,37 @@ jobs:
         run: bash static-site/fdroid/generate_metadata.sh 2>&1
 
       - name: Run update script
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: cd static-site/fdroid && bash update.sh 2>&1
 
-      - name: Remove unneded files and secrets
-        run: rm -r static-site/fdroid/keystore.p12 static-site/fdroid/config.yml static-site/fdroid/tmp static-site/fdroid/srclibs static-site/fdroid/update.sh static-site/fdroid/generate_metadata.sh static-site/fdroid/metadata
+      - name: Generate sitemap
+        run: bash static-site/generate_sitemap.sh > static-site/sitemap.xml
+
+      - name: Put Screenshot JSON-LD array in $GITHUB_OUTPUT
+        id: screenshot_jsonld_arr
+        run: echo "screenshot_jsonld_arr=$(bash static-site/generate_screenshot_jsonld.sh)" >> $GITHUB_OUTPUT
+
+      - name: Remove unneeded files and secrets
+        run: |
+          rm -r \
+            static-site/fdroid/keystore.p12 \
+            static-site/fdroid/config.yml \
+            static-site/fdroid/tmp \
+            static-site/fdroid/srclibs \
+            static-site/fdroid/update.sh \
+            static-site/fdroid/generate_metadata.sh \
+            static-site/fdroid/metadata \
+            static-site/generate_sitemap.sh \
+            static-site/fdroid/icon.png
 
       - name: Copy static site assets
         run: |
           cp -r img static-site/
           cp -r fastlane static-site/
           cp -r desktop-screenshots static-site/
-          mkdir -p static-site/composeApp/src/desktopMain/composeResources/drawable/
-          cp -r composeApp/src/desktopMain/composeResources/drawable/ic_launcher_with_bg.svg static-site/composeApp/src/desktopMain/composeResources/drawable/ic_launcher_with_bg.svg
+          mkdir -p static-site/composeApp/src/jvmMain/composeResources/drawable/
+          cp -r composeApp/src/jvmMain/composeResources/drawable/ic_launcher_with_bg.svg static-site/composeApp/src/jvmMain/composeResources/drawable/ic_launcher_with_bg.svg
           mkdir -p static-site/composeApp/src/commonMain/composeResources/files/
           cp composeApp/src/commonMain/composeResources/files/crowdin_members.txt static-site/composeApp/src/commonMain/composeResources/files/crowdin_members.txt
 
@@ -89,8 +96,12 @@ jobs:
           cp faq.md static-site/faq.md
           cp privacy-policy.md static-site/privacy-policy.md
 
+      - name: Patch JSON-LD in index.html
+        run: |
+          sed -i 's|}</script>|,"sameAs":["https://github.com/kawaiiDango/pano-scrobbler/"],"operatingSystem":"Windows, Linux, Android","applicationCategory":"MultimediaApplication","offers":{"@type":"Offer","price":"0","priceCurrency":"USD"},"screenshot": ${{ steps.screenshot_jsonld_arr.outputs.screenshot_jsonld_arr }} }</script>|' static-site/index.html
+
       - name: Upload artifact
-        uses: actions/upload-pages-artifact@v4
+        uses: actions/upload-pages-artifact@v5
         with:
           path: './static-site'
 

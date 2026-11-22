@@ -1,0 +1,238 @@
+package com.arn.scrobble.utils
+
+import co.touchlab.kermit.Logger
+import com.arn.scrobble.BuildKonfig
+import com.arn.scrobble.automation.Automation
+import java.io.File
+import java.net.URI
+import java.net.URISyntaxException
+
+
+object DesktopStuff {
+    const val IS_WINDOWS = BuildKonfig.IS_WINDOWS
+    const val IS_LINUX = BuildKonfig.IS_LINUX
+
+    private lateinit var cmdlineArgs: CmdlineArgs
+
+    private const val MINIMIZED_ARG = "minimized"
+
+    private const val DATA_DIR_ARG = "data-dir"
+    private const val NO_UPDATE_CHECK_ARG = "no-update-check"
+
+    private val appNameWithoutSpaces = BuildKonfig.APP_NAME.lowercase().replace(' ', '-')
+
+    val execDirPath: String =
+        File(ProcessHandle.current().info().command().get()).parentFile.absolutePath
+
+    val appDataRoot: File by lazy { getDataDir() }
+
+    val webViewDir by lazy {
+        File(appDataRoot, "webview").also { it.mkdirs() }
+    }
+
+    val noUpdateCheck: Boolean
+        get() = IS_LINUX && System.getenv("APPDIR").isNullOrEmpty() ||
+                cmdlineArgs.noUpdateCheck
+
+    fun parseCmdlineArgs(args: Array<String>): CmdlineArgs {
+        var minimized = false
+        var dataDir: String? = null
+        var noUpdate = false
+        var automationCommand: String? = null
+        var automationArg: String? = null
+
+        var index = 0
+        while (index < args.size) {
+            when (args[index]) {
+                "-${MINIMIZED_ARG[0]}", "--$MINIMIZED_ARG" -> {
+                    minimized = true
+                }
+
+                "-${DATA_DIR_ARG[0]}", "--$DATA_DIR_ARG" -> {
+                    index++
+                    if (index < args.size) {
+                        dataDir = args[index]
+                    } else {
+                        throw IllegalArgumentException("Missing value for argument: ${args[index - 1]}")
+                    }
+                }
+
+                "--$NO_UPDATE_CHECK_ARG" -> {
+                    noUpdate = true
+                }
+
+                "--${Automation.DESKTOP_QUIT}",
+                "--${Automation.ENABLE}",
+                "--${Automation.DISABLE}",
+                "--${Automation.LOVE}",
+                "--${Automation.UNLOVE}",
+                "--${Automation.CANCEL}",
+                "--${Automation.ALLOWLIST}",
+                "--${Automation.BLOCKLIST}" -> {
+                    automationCommand = args[index].removePrefix("--")
+                    index++
+                    if (index < args.size) {
+                        automationArg = args[index]
+                    }
+                }
+
+                else -> {
+                    println("Unknown argument ignored: ${args[index]}")
+                }
+            }
+            index++
+        }
+
+        return CmdlineArgs(
+            minimized = minimized,
+            dataDir = dataDir,
+            noUpdateCheck = noUpdate,
+            automationCommand = automationCommand,
+            automationArg = automationArg
+        ).also {
+            cmdlineArgs = it
+        }
+    }
+
+    private fun getDataDir(): File {
+        val defaultDir = when {
+            IS_WINDOWS -> {
+                System.getenv("APPDATA")?.ifEmpty { null }
+                    ?: System.getProperty("user.home")
+            }
+
+            IS_LINUX -> {
+                System.getenv("XDG_DATA_HOME")?.ifEmpty { null }
+                    ?: (System.getProperty("user.home") + "/.local/share")
+            }
+
+            else -> {
+                throw IllegalStateException("Unsupported OS")
+            }
+        }
+
+        val dirFile = cmdlineArgs.dataDir?.let { File(it) }
+            ?: File(defaultDir, appNameWithoutSpaces)
+
+        dirFile.mkdirs()
+
+        return dirFile
+    }
+
+    fun setSystemProperties() {
+        // for graalvm native image
+        var prop = "java.home"
+        if (System.getProperty(prop) == null) {
+            System.setProperty(prop, execDirPath)
+
+            if (IS_WINDOWS) {
+                // cert for graalvm release builds only
+                System.setProperty("javax.net.ssl.trustStore", "NONE")
+                System.setProperty("javax.net.ssl.trustStoreType", "Windows-ROOT")
+
+                System.setProperty("sun.java2d.dpiaware", "true")
+            }
+        }
+
+        // proxies
+        prop = "java.net.useSystemProxies"
+        if (System.getProperty(prop) == null)
+            System.setProperty(prop, "true")
+
+        // http_proxy and https_proxy are picked up by java.net.useSystemProxies on Linux
+        val socksProxy = System.getenv("SOCKS_PROXY") ?: System.getenv("socks_proxy")
+
+        try {
+            if (!socksProxy.isNullOrEmpty()) {
+                val uri = URI(socksProxy)
+                System.setProperty("socksProxyHost", uri.host)
+                System.setProperty("socksProxyPort", uri.port.toString())
+            }
+        } catch (e: URISyntaxException) {
+            Logger.e(e) { "Error while setting up socks proxy from environment" }
+        }
+
+        // skiko
+        System.setProperty("skiko.rendering.laf.global", false.toString())
+        System.setProperty("skiko.rendering.useScreenMenuBar", false.toString())
+        System.setProperty("skiko.linux.autodpi", true.toString())
+        System.setProperty("compose.application.configure.swing.globals", true.toString())
+    }
+
+    fun getLibraryPath(name: String): String {
+        val libDir = System.getProperty("pano.native.components.path")
+            ?.ifEmpty { null }
+            ?.let { File(it).absolutePath }
+            ?: execDirPath
+
+        return when {
+            IS_WINDOWS -> "$libDir\\$name.dll"
+            IS_LINUX -> "$libDir/lib$name.so"
+            else -> throw IllegalStateException("Unsupported OS")
+        }
+    }
+
+    fun addAppImageToAppLauncher() {
+        val appImagePath = System.getenv("APPIMAGE")
+        val appDir = System.getenv("APPDIR")
+        if (!IS_LINUX || appImagePath.isNullOrEmpty() || appDir.isNullOrEmpty())
+            return
+
+        val dataHome = System.getenv("XDG_DATA_HOME")?.ifEmpty { null }
+            ?: (System.getProperty("user.home") + "/.local/share")
+
+        // Icon
+        val iconSrc = File(appDir, "usr/share/icons/hicolor/scalable")
+        val iconDest = File(dataHome, "icons/hicolor/scalable")
+        iconDest.parentFile.mkdirs()
+        iconSrc.copyRecursively(iconDest, overwrite = true)
+
+        val iconSrc2 = File(appDir, "usr/share/icons/hicolor/symbolic")
+        val iconDest2 = File(dataHome, "icons/hicolor/symbolic")
+        iconDest2.parentFile.mkdirs()
+        iconSrc2.copyRecursively(iconDest2, overwrite = true)
+
+        val oldIconDest = File(dataHome, "icons/hicolor/scalable/apps/$appNameWithoutSpaces.svg")
+        if (oldIconDest.exists())
+            oldIconDest.delete()
+
+        val desktopSrc = File(appDir, "usr/share/applications/$appNameWithoutSpaces.desktop")
+        val desktopDest = File(dataHome, "applications/$appNameWithoutSpaces.desktop")
+        desktopDest.parentFile.mkdirs()
+        val desktopContent = desktopSrc.readText()
+            .replace(Regex("^Exec=.*$", RegexOption.MULTILINE), "Exec=\"$appImagePath\" %U")
+        desktopDest.writeText(desktopContent)
+    }
+
+    fun migrateAppImageDesktopFile() {
+        val appImagePath = System.getenv("APPIMAGE") ?: return
+
+        val dataHome = System.getenv("XDG_DATA_HOME")?.ifEmpty { null }
+            ?: (System.getProperty("user.home") + "/.local/share")
+
+        val desktopDest = File(dataHome, "applications/$appNameWithoutSpaces.desktop")
+
+        if (!desktopDest.exists()) return
+
+        val desktopContent = desktopDest.readText()
+        if (appImagePath in desktopContent && "Icon=$appNameWithoutSpaces\n" in desktopContent)
+            addAppImageToAppLauncher()
+    }
+
+    fun normalizeAppId(appId: String): String {
+        return when {
+            !IS_LINUX ->
+                appId
+
+            // KDE Connect
+            appId.startsWith(Stuff.PACKAGE_KDE_CONNECT_LINUX) ->
+                Stuff.PACKAGE_KDE_CONNECT_LINUX
+
+            // Chromium
+            appId.split('.').last().startsWith("instance") ->
+                appId.substringBeforeLast('.')
+
+            else -> appId
+        }
+    }
+}

@@ -25,7 +25,7 @@ import com.arn.scrobble.utils.LocaleUtils
 import com.arn.scrobble.utils.PanoNotifications
 import com.arn.scrobble.utils.PlatformStuff
 import com.arn.scrobble.utils.Stuff
-import com.arn.scrobble.utils.getSystemCountryCode
+import com.arn.scrobble.utils.getSystemLocale
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.SerializationException
@@ -40,10 +40,13 @@ import kotlin.time.Duration.Companion.days
 @Serializable
 data class MainPrefs(
     val scrobblerEnabled: Boolean = true,
+    val scrobblerPausedTill: Long = -1,
     val allowedPackages: Set<String> = emptySet(),
     val blockedPackages: Set<String> = emptySet(),
     val allowedAutomationPackages: Set<String> = emptySet(),
     val seenApps: Map<String, String> = emptyMap(),
+    val seenHostnames: Set<String> = emptySet(),
+    val blockedHostnames: Set<String> = emptySet(),
     private val regexPresetsApps: Map<String, Set<String>> = mapOf(
         RegexPreset.parse_title.name to Stuff.DEFAULT_IGNORE_ARTIST_META_WITHOUT_FALLBACK,
         RegexPreset.parse_title_with_fallback.name to Stuff.DEFAULT_IGNORE_ARTIST_META_WITH_FALLBACK
@@ -52,8 +55,9 @@ data class MainPrefs(
     private val delaySecs: Int = PREF_DELAY_SECS_DEFAULT,
     private val delayPercent: Int = PREF_DELAY_PER_DEFAULT,
     private val minDurationSecs: Int = PREF_MIN_DURATON_SECS_DEFAULT,
-    private val scrobbleSpotifyRemote: Boolean = false,
+    val scrobbleSpotifyRemote: Boolean = false,
     val linkHeartButtonToRating: Boolean = false,
+    val linkRatingToLoved: Boolean = false,
     val preventDuplicateAmbientScrobbles: Boolean = false,
     val submitNowPlaying: Boolean = true,
     val fetchAlbum: Boolean = false,
@@ -61,11 +65,15 @@ data class MainPrefs(
     val firstDayOfWeek: Int = -1,
     private val demoMode: Boolean = false,
     val showScrobbleSources: Boolean = true,
-    val themeName: String = ThemeUtils.defaultThemeName,
+    val themeHue: Float = ThemeUtils.DEFAULT_HUE,
+    val themeStyle: String = ThemeUtils.defaultThemeStyle.name,
     val themeContrast: ContrastMode = ContrastMode.LOW,
     val themeDynamic: Boolean = false,
     val themeRandom: Boolean = false,
     val themeDayNight: DayNightMode = DayNightMode.DARK,
+    val themeAlpha: Float = 1f,
+    val themeBlurSubWindow: Boolean = false,
+    val themeBlurMainWindow: Boolean = false,
     val appListWasRun: Boolean = false,
     val lastHomePagerTab: Int = 0,
     val lastChartsPeriodType: TimePeriodType = TimePeriodType.CONTINUOUS,
@@ -117,20 +125,21 @@ data class MainPrefs(
     private val itunesCountry: String? = null,
     val spotifyApi: Boolean = false,
     private val spotifyCountry: String? = null,
-    val tidalSteelSeriesApi: Boolean = true,
     val deezerApi: Boolean = true,
     val lastfmApiAlways: Boolean = false,
     private val logToFileOnAndroidSince: Long = -1,
     val lovesFetchedForCache: Boolean = false,
+    val wikiLangs: Set<String> = setOf("en"),
+    val autoExpandNowPlaying: Boolean = true,
     val extractFirstArtistPackages: Set<String> = emptySet(),
-    val discordRpc: DiscordRpcSettings = DiscordRpcSettings(),
-    val proxy: ProxySettings = ProxySettings(),
+    val discordRpc: DiscordRpcPrefs = DiscordRpcPrefs(),
+    val proxy: ProxyPrefs = ProxyPrefs(),
 ) {
 
     @Serializable
-    data class DiscordRpcSettings(
+    data class DiscordRpcPrefs(
         val enabled: Boolean = false,
-        val statusLine: Int = 2,
+        val statusLine: Int = Line.Line2.ordinal,
         val albumArt: Boolean = true,
         val albumArtFromNowPlaying: Boolean = true,
         val line1Format: String = $$"$title",
@@ -139,16 +148,32 @@ data class MainPrefs(
         val nameFormat: String = $$"$mediaPlayer",
         val showPausedForSecs: Int = 60,
         val detailsUrl: Boolean = true,
-    )
+        val lovedState: Boolean = true,
+        val buttonType: String = ButtonType.PANO_SCROBBLER.name,
+    ) {
+        enum class ButtonType {
+            PANO_SCROBBLER, LASTFM_PROFILE, LISTENBRAINZ_PROFILE, LIBREFM_PROFILE, NONE
+        }
+
+        enum class Line {
+            None,
+            Line1,
+            Line2,
+        }
+    }
 
     @Serializable
-    data class ProxySettings(
-        val enabled: Boolean = false,
+    data class ProxyPrefs(
+        val type: Type = Type.SYSTEM,
         val host: String = "127.0.0.1",
         val port: Int = 1080,
         val user: String = "",
         val pass: String = "",
     ) {
+        enum class Type {
+            SYSTEM, HTTP, SOCKS5
+        }
+
         val hasAuth get() = user.isNotEmpty() && pass.isNotEmpty()
     }
 
@@ -171,10 +196,14 @@ data class MainPrefs(
         val showScrobbleSources: Boolean = defaultMainPrefs.showScrobbleSources,
         @JsonNames("link_heart_button_to_rating")
         val linkHeartButtonToRating: Boolean = defaultMainPrefs.linkHeartButtonToRating,
-        val themeName: String = defaultMainPrefs.themeName,
+        val linkRatingToLoved: Boolean = defaultMainPrefs.linkRatingToLoved,
+        val themeHue: Float = defaultMainPrefs.themeHue,
         val themeContrast: ContrastMode = defaultMainPrefs.themeContrast,
         val themeRandom: Boolean = defaultMainPrefs.themeRandom,
         val themeDayNight: DayNightMode = defaultMainPrefs.themeDayNight,
+        val themeAlpha: Float = defaultMainPrefs.themeAlpha,
+        val themeBlurMainWindow: Boolean = defaultMainPrefs.themeBlurMainWindow,
+        val themeBlurSubWindow: Boolean = defaultMainPrefs.themeBlurSubWindow,
         @JsonNames("search_in_source")
         val searchInSource: Boolean = defaultMainPrefs.searchInSource,
         @JsonNames("scrobble_spotify_remote")
@@ -193,10 +222,9 @@ data class MainPrefs(
         val regexPresetsApps: Map<String, Set<String>> = defaultMainPrefs.regexPresetsApps,
         val spotifyApi: Boolean = defaultMainPrefs.spotifyApi,
         val spotifyCountry: String? = defaultMainPrefs.spotifyCountry,
-        val tidalSteelSeriesApi: Boolean = defaultMainPrefs.tidalSteelSeriesApi,
         val deezerApi: Boolean = defaultMainPrefs.deezerApi,
         val lastfmApiAlways: Boolean = defaultMainPrefs.lastfmApiAlways,
-        val discordRpc: DiscordRpcSettings = defaultMainPrefs.discordRpc,
+        val discordRpc: DiscordRpcPrefs = defaultMainPrefs.discordRpc,
     )
 
     val delaySecsP
@@ -212,13 +240,10 @@ data class MainPrefs(
         get() = demoMode && BuildKonfig.DEBUG
 
     val spotifyCountryP
-        get() = spotifyCountry ?: LocaleUtils.getSystemCountryCode()
+        get() = spotifyCountry ?: LocaleUtils.getSystemLocale().country.ifEmpty { "US" }
 
     val itunesCountryP
-        get() = itunesCountry ?: LocaleUtils.getSystemCountryCode()
-
-    val scrobbleSpotifyRemoteP
-        get() = !PlatformStuff.isTv && scrobbleSpotifyRemote
+        get() = itunesCountry ?: LocaleUtils.getSystemLocale().country.ifEmpty { "US" }
 
     val usePlayFromSearchP
         get() = PlatformStuff.isTv || !PlatformStuff.isDesktop && usePlayFromSearch
@@ -258,10 +283,14 @@ data class MainPrefs(
         autoDetectApps = prefs.autoDetectApps,
         showScrobbleSources = prefs.showScrobbleSources,
         linkHeartButtonToRating = prefs.linkHeartButtonToRating,
-        themeName = prefs.themeName,
+        linkRatingToLoved = prefs.linkRatingToLoved,
+        themeHue = prefs.themeHue,
         themeContrast = prefs.themeContrast,
         themeRandom = prefs.themeRandom,
         themeDayNight = prefs.themeDayNight,
+        themeAlpha = prefs.themeAlpha,
+        themeBlurMainWindow = prefs.themeBlurMainWindow,
+        themeBlurSubWindow = prefs.themeBlurSubWindow,
         searchInSource = prefs.searchInSource,
         scrobbleSpotifyRemote = prefs.scrobbleSpotifyRemote,
         spotifyArtistSearchApproximate = prefs.spotifyArtistSearchApproximate,
@@ -275,7 +304,6 @@ data class MainPrefs(
         discordRpc = prefs.discordRpc,
         spotifyApi = prefs.spotifyApi,
         spotifyCountry = prefs.spotifyCountry,
-        tidalSteelSeriesApi = prefs.tidalSteelSeriesApi,
         deezerApi = prefs.deezerApi,
         lastfmApiAlways = prefs.lastfmApiAlways,
     )
@@ -290,10 +318,14 @@ data class MainPrefs(
         autoDetectApps = autoDetectApps,
         showScrobbleSources = showScrobbleSources,
         linkHeartButtonToRating = linkHeartButtonToRating,
-        themeName = themeName,
+        linkRatingToLoved = linkRatingToLoved,
+        themeHue = themeHue,
         themeContrast = themeContrast,
         themeRandom = themeRandom,
         themeDayNight = themeDayNight,
+        themeAlpha = themeAlpha,
+        themeBlurMainWindow = themeBlurMainWindow,
+        themeBlurSubWindow = themeBlurSubWindow,
         searchInSource = searchInSource,
         scrobbleSpotifyRemote = scrobbleSpotifyRemote,
         spotifyArtistSearchApproximate = spotifyArtistSearchApproximate,
@@ -307,7 +339,6 @@ data class MainPrefs(
         discordRpc = discordRpc,
         spotifyApi = spotifyApi,
         spotifyCountry = spotifyCountry,
-        tidalSteelSeriesApi = tidalSteelSeriesApi,
         deezerApi = deezerApi,
         lastfmApiAlways = lastfmApiAlways,
     )
@@ -336,13 +367,16 @@ data class MainPrefs(
         const val FILE_NAME = "main-prefs.json"
         const val PREF_DELAY_SECS_MIN = 30
         const val PREF_DELAY_SECS_MAX = 360
-        private const val PREF_DELAY_SECS_DEFAULT = 180
-        private const val PREF_DELAY_PER_DEFAULT = 50
+        const val PREF_DELAY_SECS_DEFAULT = 240
+        const val PREF_DELAY_PER_DEFAULT = 50
         const val PREF_DELAY_PER_MIN = 30
         const val PREF_DELAY_PER_MAX = 95
-        private const val PREF_MIN_DURATON_SECS_DEFAULT = 30
+        const val PREF_MIN_DURATON_SECS_DEFAULT = 30
         const val PREF_MIN_DURATON_SECS_MIN = 10
         const val PREF_MIN_DURATON_SECS_MAX = 60
+        const val PREF_MIN_ALPHA = 0.5f
+        const val PREF_MID_ALPHA = 0.6f
+        const val PREF_MAX_ALPHA = 1f
 
         fun migrations() = listOf<DataMigration<MainPrefs>>(
             MainPrefsMigration6(),

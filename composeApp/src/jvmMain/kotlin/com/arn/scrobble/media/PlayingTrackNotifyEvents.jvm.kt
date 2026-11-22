@@ -1,0 +1,17 @@
+package com.arn.scrobble.media
+
+import com.arn.scrobble.utils.PanoNotifications
+
+actual fun notifyPlayingTrackEvent(event: PlayingTrackNotifyEvent) {
+    if (globalTrackEventFlow.subscriptionCount.value > 0) {
+        globalTrackEventFlow.tryEmit(event)
+    }
+}
+
+
+actual fun getNowPlayingFromMainProcess(): PlayingTrackNotifyEvent.TrackPlaying? {
+    val playingEvent = PanoNotifications.playingTrackStates.value.values
+        .filterIsInstance<PlayingTrackNotifyEvent.TrackPlaying>()
+        .firstOrNull { it.nowPlaying }
+    return playingEvent
+}

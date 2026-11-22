@@ -1,11 +1,10 @@
 package com.arn.scrobble.friends
 
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -17,18 +16,23 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.ButtonGroupDefaults
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
-import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.FilledTonalToggleButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.LocalContentColor
+import androidx.compose.material3.MaterialShapes.Companion.Cookie7Sided
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedToggleButton
+import androidx.compose.material3.OutlinedToggleButtonDefaults
 import androidx.compose.material3.Text
-import androidx.compose.material3.ToggleButton
+import androidx.compose.material3.ToggleButtonDefaults
+import androidx.compose.material3.ToggleButtonSize
 import androidx.compose.material3.pulltorefresh.PullToRefreshState
+import androidx.compose.material3.toShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
@@ -41,7 +45,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
@@ -51,6 +54,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.LifecycleResumeEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.navigation3.runtime.result.ResultEffect
 import androidx.paging.LoadState
 import androidx.paging.compose.collectAsLazyPagingItems
 import androidx.paging.compose.itemKey
@@ -70,23 +74,26 @@ import com.arn.scrobble.icons.OpenInBrowser
 import com.arn.scrobble.icons.Search
 import com.arn.scrobble.main.PanoPullToRefresh
 import com.arn.scrobble.navigation.PanoRoute
+import com.arn.scrobble.navigation.PanoTab
+import com.arn.scrobble.navigation.PullToRefreshResult
 import com.arn.scrobble.ui.AutoRefreshEffect
 import com.arn.scrobble.ui.AvatarOrInitials
 import com.arn.scrobble.ui.DraggableItem
-import com.arn.scrobble.ui.EmptyText
 import com.arn.scrobble.ui.ListLoadError
 import com.arn.scrobble.ui.MusicEntryListItem
+import com.arn.scrobble.ui.PanoDropdownMenu
 import com.arn.scrobble.ui.PanoLazyColumn
 import com.arn.scrobble.ui.PanoPullToRefreshStateForTab
 import com.arn.scrobble.ui.dragContainer
+import com.arn.scrobble.ui.emptyText
 import com.arn.scrobble.ui.getMusicEntryPlaceholderItem
+import com.arn.scrobble.ui.myColors
 import com.arn.scrobble.ui.rememberDragDropState
 import com.arn.scrobble.ui.shimmerWindowBounds
+import com.arn.scrobble.utils.LocaleUtils.format
 import com.arn.scrobble.utils.PanoTimeFormatter
 import com.arn.scrobble.utils.PlatformStuff
 import com.arn.scrobble.utils.Stuff
-import com.arn.scrobble.utils.Stuff.format
-import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.pluralStringResource
@@ -107,6 +114,7 @@ import pano_scrobbler.composeapp.generated.resources.since_time
 import pano_scrobbler.composeapp.generated.resources.sort
 import pano_scrobbler.composeapp.generated.resources.track
 import pano_scrobbler.composeapp.generated.resources.unpin
+import kotlin.time.Duration.Companion.seconds
 
 private const val PINNED_PREFIX = "pinned_"
 private const val UNPINNED_PREFIX = "unpinned_"
@@ -116,7 +124,6 @@ fun FriendsScreen(
     user: UserCached,
     pullToRefreshState: PullToRefreshState,
     onSetRefreshing: (PanoPullToRefreshStateForTab) -> Unit,
-    pullToRefreshTriggered: () -> Flow<Unit>,
     onNavigate: (PanoRoute) -> Unit,
     onTitleChange: (String) -> Unit,
     modifier: Modifier = Modifier,
@@ -129,10 +136,10 @@ fun FriendsScreen(
     val friendsExtraDataMap by viewModel.friendsExtraDataMap.collectAsStateWithLifecycle()
     val friendsExtraDataMapState = remember { mutableStateMapOf<String, FriendExtraData>() }
     val pinnedFriends by viewModel.pinnedFriends.collectAsStateWithLifecycle()
-    var pinnedFriendsReordered by remember { mutableStateOf(pinnedFriends) }
+    var pinnedFriendsReordered by remember { mutableStateOf(pinnedFriends.orEmpty()) }
 
     val pinnedUsernamesSet by remember(pinnedFriendsReordered) {
-        mutableStateOf(pinnedFriends.map { it.name }.toSet())
+        mutableStateOf(pinnedFriends.orEmpty().map { it.name }.toSet())
     }
     val sortedFriends by viewModel.sortedFriends.collectAsStateWithLifecycle()
     val lastFriendsRefreshTime by viewModel.lastFriendsRefreshTime.collectAsStateWithLifecycle()
@@ -169,8 +176,9 @@ fun FriendsScreen(
     val followingText = stringResource(Res.string.following)
 
     LaunchedEffect(pinnedFriends) {
-        if (showPinned) {
-            pinnedFriendsReordered = pinnedFriends
+        val pf = pinnedFriends
+        if (showPinned && pf != null) {
+            pinnedFriendsReordered = pf
         }
     }
 
@@ -200,7 +208,7 @@ fun FriendsScreen(
                     .forEach { username ->
                         val cachedData = friendsExtraDataMapState[username]
                         if (cachedData == null ||
-                            (System.currentTimeMillis() - cachedData.lastUpdated > Stuff.FRIENDS_REFRESH_INTERVAL)
+                            (System.currentTimeMillis() - cachedData.lastUpdated > Stuff.FRIENDS_REFRESH_INTERVAL_S.seconds.inWholeMilliseconds)
                         ) {
                             Logger.d { "Loading extra data for friend: $username" }
                             viewModel.loadFriendsRecents(username)
@@ -224,9 +232,9 @@ fun FriendsScreen(
     }
 
 
-    LaunchedEffect(Unit) {
-        pullToRefreshTriggered().collect {
-            if (friends.loadState.refresh is LoadState.NotLoading) {
+    ResultEffect<PullToRefreshResult> {
+        if (it.tab == PanoTab.Following) {
+            if (friends.loadState.refresh !is LoadState.Loading) {
                 viewModel.markExtraDataAsStale()
                 viewModel.clearSortedFriends()
                 friends.refresh()
@@ -237,7 +245,7 @@ fun FriendsScreen(
 
     AutoRefreshEffect(
         firstPageLoadedTime = lastFriendsRecentsRefreshTime,
-        interval = Stuff.FRIENDS_REFRESH_INTERVAL,
+        interval = Stuff.FRIENDS_REFRESH_INTERVAL_S.seconds,
         doRefresh = {
             if (sortedFriends == null && listState.firstVisibleItemIndex < 4) {
                 viewModel.markExtraDataAsStale()
@@ -255,19 +263,18 @@ fun FriendsScreen(
         isRefreshing = friends.loadState.refresh is LoadState.Loading,
         modifier = modifier,
     ) {
-
-        EmptyText(
-            visible = friends.loadState.refresh is LoadState.NotLoading &&
-                    friends.itemCount == 0 && pinnedFriendsReordered.isEmpty(),
-            text = stringResource(Res.string.no_friends)
-        )
-
         PanoLazyColumn(
             state = listState,
+            verticalArrangement = Arrangement.spacedBy(2.dp),
             modifier = Modifier
                 .fillMaxSize()
                 .dragContainer(dragDropState)
         ) {
+            if (friends.loadState.refresh is LoadState.NotLoading &&
+                friends.itemCount == 0 && pinnedFriendsReordered.isEmpty()
+            )
+                emptyText { stringResource(Res.string.no_friends) }
+
             if (sortedFriends != null) {
                 items(
                     sortedFriends!!,
@@ -374,7 +381,9 @@ fun FriendsScreen(
 
             friends.apply {
                 when {
-                    loadState.refresh is LoadState.Loading -> {
+                    loadState.refresh is LoadState.Loading &&
+                            pinnedFriendsReordered.size == pinnedFriends?.size // has loaded from disk
+                        -> {
                         items(8) { // don't put key here, top items are not scrolled to initially, otherwise
                             FriendItemShimmer(
                                 modifier = Modifier.animateItem()
@@ -409,6 +418,7 @@ fun FriendsScreen(
                             .fillMaxWidth()
                     ) {
                         OutlinedButton(
+                            shapes = ButtonDefaults.shapes(),
                             onClick = {
                                 viewModel.sortByTime(friends.itemSnapshotList.items)
                                 scope.launch { listState.animateScrollToItem(0) }
@@ -450,10 +460,7 @@ private fun FriendItemShimmer(
     )
 }
 
-@OptIn(
-    ExperimentalMaterial3ExpressiveApi::class, ExperimentalComposeUiApi::class,
-    ExperimentalFoundationApi::class
-)
+@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun FriendItem(
     friend: UserCached,
@@ -469,72 +476,84 @@ private fun FriendItem(
     onMove: (Int, Int) -> Unit = { _, _ -> },
     isLastPin: Boolean = false,
 ) {
-    val playCount = remember(extraData) { extraData?.playCount }
-    val track = remember(extraData) { extraData?.track }
+    val playCount = extraData?.playCount
+    val track = extraData?.track
     val scope = rememberCoroutineScope()
     var detailsShown by remember { mutableStateOf(false) }
+    val avatarShape = if (pinIndex == null) CircleShape else Cookie7Sided.toShape()
 
     Row(
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(16.dp),
-        modifier = modifier.padding(horizontal = 4.dp)
+        modifier = modifier
     ) {
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.spacedBy(2.dp),
+        OutlinedToggleButton(
+            checked = detailsShown,
+            onCheckedChange = {
+                detailsShown = it
+            },
+            colors = OutlinedToggleButtonDefaults.myColors(),
+            shapes = ToggleButtonDefaults.shapesFor(ToggleButtonSize.Small).let {
+                it.copy(shape = it.pressedShape)
+            },
+            border = null,
+            contentPadding = PaddingValues(horizontal = 0.dp, vertical = 4.dp),
+            enabled = !forShimmer,
             modifier = Modifier
-                .width(72.dp)
-                .padding(vertical = 4.dp)
-                .clip(MaterialTheme.shapes.medium)
-                .clickable(
-                    enabled = !forShimmer,
-                    onClick = { detailsShown = true })
+                .width(84.dp)
                 .then(if (canPinUnpin) dragHandleModifier else Modifier)
-
         ) {
-            AvatarOrInitials(
-                avatarUrl = friend.largeImage,
-                avatarName = friend.name,
-                textStyle = MaterialTheme.typography.titleLarge,
-                modifier = Modifier
-                    .aspectRatio(1f)
-                    .clip(CircleShape)
-                    .then(if (forShimmer) Modifier.shimmerWindowBounds() else Modifier)
-                    .then(
-                        if (pinIndex != null)
-                            Modifier.border(
-                                width = 4.dp,
-                                color = MaterialTheme.colorScheme.secondary,
-                                shape = CircleShape
-                            )
-                        else
-                            Modifier
-                    )
-            )
-
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
+            Box(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 if (pinIndex != null) {
                     Icon(
                         imageVector = Icons.DragHandle,
                         contentDescription = null,
-                        tint = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier
+                            .size(16.dp)
                     )
                 }
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                ) {
+                    AvatarOrInitials(
+                        avatarUrl = friend.largeImage,
+                        avatarName = friend.name,
+                        textStyle = MaterialTheme.typography.titleLarge,
+                        modifier = Modifier
+                            .width(72.dp)
+                            .aspectRatio(1f)
+                            .clip(avatarShape)
+                            .shimmerWindowBounds(forShimmer)
+                            .then(
+                                if (pinIndex != null)
+                                    Modifier.border(
+                                        width = 2.dp,
+                                        color = LocalContentColor.current,
+                                        shape = avatarShape
+                                    )
+                                else
+                                    Modifier
+                            )
+                    )
 
-                Text(
-                    text = if (Stuff.isInDemoMode) "user" else friend.name,
-                    style = MaterialTheme.typography.bodyMedium,
-                    fontWeight = if (pinIndex != null)
-                        FontWeight.Bold
-                    else
-                        null,
-                    textAlign = TextAlign.Center,
-                    modifier = Modifier.weight(1f)
-                )
+                    Text(
+                        text = if (Stuff.isInDemoMode) "user" else friend.name,
+                        style = MaterialTheme.typography.labelMediumEmphasized,
+                        fontWeight = if (pinIndex != null)
+                            FontWeight.Bold
+                        else
+                            null,
+                        textAlign = TextAlign.Center,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                    )
+                }
             }
         }
 
@@ -558,96 +577,92 @@ private fun FriendItem(
             }
         } else {
             MusicEntryListItem(
-                entry = track ?: getMusicEntryPlaceholderItem(Stuff.TYPE_TRACKS),
+                entry = track ?: getMusicEntryPlaceholderItem(Stuff.TYPE_TRACKS, showDate = true),
                 onEntryClick = {
                     if (track != null)
                         onNavigateToTrackInfo(track, friend)
                 },
                 forShimmer = track == null,
-                modifier = if (track == null)
-                    Modifier
-                        .shimmerWindowBounds()
-                else
-                    Modifier
+                modifier = Modifier
+                    .shimmerWindowBounds(track == null)
             )
         }
 
         if (detailsShown) {
-            DropdownMenu(
+            PanoDropdownMenu(
                 expanded = true,
                 onDismissRequest = { detailsShown = false },
+                headerContent = {
+                    MenuDefaults.DropdownMenuGroupLabel {
+                        Column(
+                            verticalArrangement = Arrangement.spacedBy(2.dp),
+                            modifier = Modifier
+                                .padding(vertical = 4.dp)
+                        ) {
+                            Text(
+                                text = friend.realname.ifEmpty { friend.name },
+                                style = MaterialTheme.typography.titleLargeEmphasized,
+                                color = MaterialTheme.colorScheme.primary,
+                            )
+
+                            if (friend.country.isNotEmpty() && friend.country != "None")
+                                Text(
+                                    text = stringResource(
+                                        Res.string.from,
+                                        friend.country + " " + Stuff.getCountryFlag(friend.country)
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+
+                            if (playCount != null) {
+                                Text(
+                                    text = pluralStringResource(
+                                        Res.plurals.num_scrobbles_noti,
+                                        playCount,
+                                        playCount.format()
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                            }
+
+                            if (friend.registeredTime > Stuff.TIME_2002)
+                                Text(
+                                    stringResource(
+                                        Res.string.since_time,
+                                        PanoTimeFormatter.day(friend.registeredTime)
+                                    ),
+                                    style = MaterialTheme.typography.bodyMedium,
+                                )
+                        }
+                    }
+                }
             ) {
-                val textModifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-
-                Text(
-                    text = friend.realname.ifEmpty { friend.name },
-                    style = MaterialTheme.typography.titleLargeEmphasized,
-                    color = MaterialTheme.colorScheme.primary,
-                    modifier = textModifier,
-                )
-
-                if (friend.country.isNotEmpty() && friend.country != "None")
-                    Text(
-                        text = stringResource(
-                            Res.string.from,
-                            friend.country + " " + Stuff.getCountryFlag(friend.country)
-                        ),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = textModifier,
-                    )
-
-                if (playCount != null) {
-                    Text(
-                        text = pluralStringResource(
-                            Res.plurals.num_scrobbles_noti,
-                            playCount,
-                            playCount.format()
-                        ),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = textModifier,
-                    )
-                }
-
-                if (friend.registeredTime > Stuff.TIME_2002)
-                    Text(
-                        stringResource(
-                            Res.string.since_time,
-                            PanoTimeFormatter.relative(friend.registeredTime, null)
-                        ),
-                        style = MaterialTheme.typography.bodyMedium,
-                        modifier = textModifier,
-                    )
-
-                HorizontalDivider(
-                    modifier = Modifier.padding(vertical = 4.dp)
-                )
-
                 if (pinIndex != null) {
-                    PinControls(
-                        isPinned = true,
-                        onPinUnpin = onPinUnpin,
-                        onMoveUp = if (pinIndex > 0) {
-                            {
-                                onMove(pinIndex, pinIndex - 1)
-                            }
-                        } else
-                            null,
-                        onMoveDown = if (!isLastPin) {
-                            {
-                                onMove(pinIndex, pinIndex + 1)
-                            }
-                        } else
-                            null,
-                    )
+                    custom {
+                        PinControls(
+                            isPinned = true,
+                            onPinUnpin = onPinUnpin,
+                            onMoveUp = if (pinIndex > 0) {
+                                {
+                                    onMove(pinIndex, pinIndex - 1)
+                                }
+                            } else
+                                null,
+                            onMoveDown = if (!isLastPin) {
+                                {
+                                    onMove(pinIndex, pinIndex + 1)
+                                }
+                            } else
+                                null,
+                        )
+                    }
                 }
 
-                DropdownMenuItem(
+                item(
                     leadingIcon = {
                         Icon(
                             imageVector = Icons.History,
-                            contentDescription = stringResource(Res.string.profile),
+                            contentDescription = null,
                         )
                     },
                     text = {
@@ -660,11 +675,11 @@ private fun FriendItem(
                 )
 
                 if (pinIndex == null && canPinUnpin) {
-                    DropdownMenuItem(
+                    item(
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Keep,
-                                contentDescription = stringResource(Res.string.pin),
+                                contentDescription = null,
                             )
                         },
                         text = {
@@ -677,11 +692,11 @@ private fun FriendItem(
                 }
 
                 if (track is Track) {
-                    DropdownMenuItem(
+                    item(
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.Search,
-                                contentDescription = stringResource(Res.string.search),
+                                contentDescription = null,
                             )
                         },
                         text = {
@@ -701,11 +716,11 @@ private fun FriendItem(
                 }
 
                 if (friend.url.isNotEmpty() && !PlatformStuff.isTv) {
-                    DropdownMenuItem(
+                    item(
                         leadingIcon = {
                             Icon(
                                 imageVector = Icons.OpenInBrowser,
-                                contentDescription = stringResource(Res.string.profile),
+                                contentDescription = null,
                             )
                         },
                         text = {
@@ -725,7 +740,6 @@ private fun FriendItem(
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun PinControls(
     isPinned: Boolean,
@@ -742,7 +756,7 @@ private fun PinControls(
         ),
     ) {
         if (isPinned) {
-            OutlinedToggleButton(
+            FilledTonalToggleButton(
                 enabled = onMoveUp != null,
                 checked = false,
                 onCheckedChange = {
@@ -758,7 +772,7 @@ private fun PinControls(
             }
         }
 
-        ToggleButton(
+        FilledTonalToggleButton(
             checked = isPinned,
             onCheckedChange = {
                 onPinUnpin(!isPinned)
@@ -774,7 +788,7 @@ private fun PinControls(
         }
 
         if (isPinned) {
-            OutlinedToggleButton(
+            FilledTonalToggleButton(
                 enabled = onMoveDown != null,
                 checked = false,
                 onCheckedChange = {

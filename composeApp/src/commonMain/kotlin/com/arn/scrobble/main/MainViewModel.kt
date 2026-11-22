@@ -7,12 +7,12 @@ import androidx.lifecycle.viewModelScope
 import co.touchlab.kermit.Logger
 import com.arn.scrobble.BuildKonfig
 import com.arn.scrobble.api.DrawerData
+import com.arn.scrobble.api.Scrobblables
 import com.arn.scrobble.api.UserCached
 import com.arn.scrobble.api.lastfm.ApiException
 import com.arn.scrobble.billing.PurchaseMethod
 import com.arn.scrobble.db.PanoDb
 import com.arn.scrobble.edits.EditScrobbleUtils
-import com.arn.scrobble.pref.AppItem
 import com.arn.scrobble.ui.PanoSnackbarVisuals
 import com.arn.scrobble.utils.PlatformStuff
 import com.arn.scrobble.utils.Stuff
@@ -24,37 +24,22 @@ import com.arn.scrobble.work.DigestWorker
 import com.arn.scrobble.work.PendingScrobblesWork
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.filter
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.SerializationException
-import java.util.Calendar
+import kotlin.time.Duration.Companion.seconds
 
 class MainViewModel : ViewModel() {
 
     val drawerDataMap = mutableStateMapOf<UserCached, DrawerData>()
 
-    private val _pullToRefreshTriggered = MutableSharedFlow<Int>()
-
     private val repository = VariantStuff.billingRepository
 
     val formattedPrice = repository.formattedPrice
-
-    private val _selectedPackages = MutableSharedFlow<Pair<List<AppItem>, List<AppItem>>>()
-    val selectedPackages = _selectedPackages.asSharedFlow()
-
-    val isItChristmas by lazy {
-        val cal = Calendar.getInstance()
-        BuildKonfig.DEBUG ||
-                (cal.get(Calendar.MONTH) == Calendar.DECEMBER && cal.get(Calendar.DAY_OF_MONTH) >= 24) ||
-                (cal.get(Calendar.MONTH) == Calendar.JANUARY && cal.get(Calendar.DAY_OF_MONTH) <= 5)
-    }
 
     val editScrobbleUtils = EditScrobbleUtils(viewModelScope)
 
@@ -118,7 +103,7 @@ class MainViewModel : ViewModel() {
     fun updateScrobblerServiceState(requestRebind: Boolean) {
         viewModelScope.launch(Dispatchers.IO) {
             if (requestRebind)
-                delay(2000)
+                delay(2.seconds)
 
             val state = PlatformStuff.checkScrobblerState(requestRebind)
             _scrobblerStateFlow.value = state
@@ -129,8 +114,9 @@ class MainViewModel : ViewModel() {
                 killedReasonReported = true
                 val message = state.reason.formatted()
                 val pss = " ${state.reason.pssMb} MB"
+                val importance = " ${state.reason.importance} i"
                 val notiState = if (!state.reason.fgNoti) " noFgNoti" else ""
-                Logger.e(AppExitException(message + pss + notiState)) { message }
+                Logger.e(AppExitException(message + pss + importance + notiState)) { message }
             }
         }
     }
@@ -143,7 +129,7 @@ class MainViewModel : ViewModel() {
 
     fun queryPurchasesAsync() {
         viewModelScope.launch {
-            delay(2000)
+            delay(2.seconds)
             repository.queryPurchasesAsync()
         }
     }
@@ -156,25 +142,44 @@ class MainViewModel : ViewModel() {
         repository.endDataSourceConnections()
     }
 
+    suspend fun loadDrawerData(user: UserCached) {
+        val exists = user in drawerDataMap
 
-    fun onSetPackagesSelection(checked: List<AppItem>, unchecked: List<AppItem>) {
-        viewModelScope.launch {
-            _selectedPackages.emit(checked to unchecked)
+        if (exists)
+            delay(2.seconds)
+
+        if (user.isSelf) {
+            PlatformStuff.mainPrefs.data.map {
+                it.drawerData[it.currentAccountType]
+            }.first()
+                ?.let { drawerDataMap[user] = it }
         }
+
+        val scrobblable = Scrobblables.current
+        scrobblable
+            ?.loadDrawerData(user.name)
+            ?.onSuccess { dd ->
+                if (user.isSelf) {
+                    PlatformStuff.mainPrefs.updateData { p ->
+                        p.copy(
+                            drawerData = p.drawerData + (p.currentAccountType to dd),
+                            scrobbleAccounts = p.scrobbleAccounts.map {
+                                if (it.type == p.currentAccountType &&
+                                    dd.profilePicUrl != null &&
+                                    dd.profilePicUrl != it.user.largeImage
+                                ) {
+                                    val u = it.user.copy(largeImage = dd.profilePicUrl)
+                                    it.copy(user = u)
+                                } else {
+                                    it
+                                }
+                            }
+                        )
+                    }
+                }
+                drawerDataMap[user] = dd
+            }
     }
-
-    fun notifyPullToRefresh(id: Int) {
-        viewModelScope.launch {
-            _pullToRefreshTriggered.emit(id)
-        }
-    }
-
-
-    fun getPullToRefreshTrigger(id: Int) =
-        _pullToRefreshTriggered
-            .filter { it == id }
-            .map { }
-
 
     companion object {
         private var killedReasonReported = false

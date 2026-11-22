@@ -21,6 +21,7 @@ import org.jetbrains.compose.resources.getString
 import pano_scrobbler.composeapp.generated.resources.Res
 import pano_scrobbler.composeapp.generated.resources.pending_batch
 import pano_scrobbler.composeapp.generated.resources.submitting_loves
+import kotlin.time.Duration.Companion.milliseconds
 
 class PendingScrobblesWorker(
     override val setProgress: suspend (CommonWorkProgress) -> Unit,
@@ -54,7 +55,7 @@ class PendingScrobblesWorker(
     }
 
     private suspend fun submitScrobbles() {
-        val entries = dao.allScrobbles(HARD_LIMIT)
+        val entries = dao.allScrobblesForSubmission(HARD_LIMIT)
 
         for (chunk in entries.chunked(BATCH_SIZE)) {
             submitScrobbleBatch(chunk)
@@ -133,7 +134,7 @@ class PendingScrobblesWorker(
     }
 
     private suspend fun submitLoves() {
-        val entries = dao.allLoves(100)
+        val entries = dao.allLovesForSubmission(100)
         val total = entries.size
         for ((submitted, entry) in entries.withIndex()) {
             setProgress(
@@ -182,7 +183,7 @@ class PendingScrobblesWorker(
                 dao.logFailure(listOf(entry._id), exceptions)
             }
 
-            delay(DELAY)
+            delay(DELAY.milliseconds)
         }
     }
 
@@ -222,7 +223,7 @@ class PendingScrobblesWorker(
     companion object {
         const val NAME = "pending_scrobbles"
         private val MOCK = BuildKonfig.DEBUG && false
-        private const val HARD_LIMIT = 2500
+        private const val HARD_LIMIT = 700
         private var BATCH_SIZE = 50 //max 50
         private const val DELAY = 1000L
         private const val MAX_FAILURES_PER_SERVICE = 1

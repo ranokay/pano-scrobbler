@@ -1,23 +1,22 @@
 package com.arn.scrobble.edits
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedIconButton
+import androidx.compose.material3.OutlinedIconToggleButton
 import androidx.compose.material3.SplitButtonDefaults
 import androidx.compose.material3.SplitButtonLayout
 import androidx.compose.material3.Text
@@ -62,15 +61,17 @@ import com.arn.scrobble.ui.AppIcon
 import com.arn.scrobble.ui.DraggableItem
 import com.arn.scrobble.ui.EmptyTextWithImportButtonOnTv
 import com.arn.scrobble.ui.LabeledCheckbox
+import com.arn.scrobble.ui.PanoDropdownMenu
 import com.arn.scrobble.ui.PanoLazyColumn
 import com.arn.scrobble.ui.backgroundForShimmer
 import com.arn.scrobble.ui.dragContainer
 import com.arn.scrobble.ui.panoContentPadding
 import com.arn.scrobble.ui.rememberDragDropState
+import com.arn.scrobble.ui.shapedClickable
+import com.arn.scrobble.utils.LocaleUtils.format
 import com.arn.scrobble.utils.PlatformStuff
 import com.arn.scrobble.utils.Stuff
 import com.arn.scrobble.utils.Stuff.collectAsStateWithInitialValue
-import com.arn.scrobble.utils.Stuff.format
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -154,7 +155,6 @@ fun RegexEditsScreen(
 }
 
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun RegexEditsList(
     presetsWithState: List<Pair<RegexPreset, Boolean>>,
@@ -173,13 +173,8 @@ private fun RegexEditsList(
     val isLicenseValid = LocalLicenseValidState.current
     val maxPatterns = if (isLicenseValid) Stuff.MAX_PATTERNS_HIGH else Stuff.MAX_PATTERNS
     val scope = rememberCoroutineScope()
-    val nonRegexItemsCount = remember {
-        RegexPresets.filteredPresets.size + listOfNotNull(
-            if (!PlatformStuff.isTv) 1 else null, // Test button
-            1, // presets_header
-            1, // custom_header
-        ).sum()
-    }
+    val nonRegexItemsCount = RegexPresets.filteredPresets.size +
+            1 + 1 // presets_header, custom_header
 
     val listState = rememberLazyListState()
     val dragDropState =
@@ -196,25 +191,6 @@ private fun RegexEditsList(
         contentPadding = panoContentPadding(mayHaveBottomFab = true),
         modifier = modifier.dragContainer(dragDropState),
     ) {
-        if (!PlatformStuff.isTv) {
-            item(key = "test_button") {
-                Box(
-                    contentAlignment = Alignment.Center,
-                    modifier = Modifier
-                        .animateItem()
-                        .fillMaxWidth(),
-                ) {
-                    OutlinedButton(
-                        onClick = {
-                            onNavigate(PanoRoute.RegexEditsTest)
-                        },
-                    ) {
-                        Text(text = stringResource(Res.string.edit_regex_test))
-                    }
-                }
-            }
-        }
-
         item(key = "presets_header") {
             Text(
                 text = stringResource(Res.string.edit_presets),
@@ -287,12 +263,29 @@ private fun RegexEditsList(
                     )
                 else
                     TextButton(
+                        shapes = ButtonDefaults.shapes(),
                         onClick = {
                             onNavigate(PanoRoute.Billing)
                         },
                     ) {
                         Text(maxPatternsText)
                     }
+
+                if (!PlatformStuff.isTv) {
+                    Spacer(
+                        modifier = Modifier
+                            .weight(1f)
+                    )
+
+                    OutlinedButton(
+                        shapes = ButtonDefaults.shapes(),
+                        onClick = {
+                            onNavigate(PanoRoute.RegexEditsTest)
+                        },
+                    ) {
+                        Text(text = stringResource(Res.string.edit_regex_test))
+                    }
+                }
             }
         }
 
@@ -349,7 +342,9 @@ private fun PresetItem(
         )
 
         if (onNavigateSettings != null) {
-            IconButton(
+            OutlinedIconButton(
+                shapes = IconButtonDefaults.shapes(),
+                border = ButtonDefaults.outlinedButtonBorder(true),
                 onClick = onNavigateSettings
             ) {
                 Icon(
@@ -361,7 +356,6 @@ private fun PresetItem(
     }
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun RegexEditItem(
     regexEdit: RegexEdit,
@@ -434,8 +428,7 @@ private fun RegexEditItem(
         Column(
             modifier = Modifier
                 .weight(1f)
-                .clip(MaterialTheme.shapes.medium)
-                .clickable(enabled = !forShimmer) { onItemClick(regexEdit) }
+                .shapedClickable(clickableAdded = !forShimmer) { onItemClick(regexEdit) }
                 .padding(8.dp)
                 .backgroundForShimmer(forShimmer)
         ) {
@@ -471,20 +464,23 @@ private fun RegexEditItem(
             }
         }
 
-        IconButton(
-            onClick = { dropdownShown = true },
+        OutlinedIconToggleButton(
+            checked = dropdownShown,
+            onCheckedChange = { dropdownShown = it },
             enabled = !forShimmer,
+            shapes = IconButtonDefaults.toggleableShapes(),
+            border = null
         ) {
             Icon(
                 imageVector = Icons.MoreVert,
                 contentDescription = stringResource(Res.string.item_options),
             )
 
-            DropdownMenu(
+            PanoDropdownMenu(
                 expanded = dropdownShown,
                 onDismissRequest = { dropdownShown = false },
             ) {
-                DropdownMenuItem(
+                item(
                     text = {
                         Text(
                             stringResource(
@@ -510,7 +506,7 @@ private fun RegexEditItem(
                     },
                 )
 
-                DropdownMenuItem(
+                item(
                     text = {
                         Text(
                             stringResource(Res.string.delete),
@@ -538,8 +534,10 @@ private fun RegexEditItem(
 private fun getModifierIcons(regexEdit: RegexEdit): List<ImageVector> {
     val m = mutableListOf<ImageVector>()
 
-    m += if (regexEdit.continueMatching) Icons.KeyboardArrowDown
-    else Icons.Stop
+    m += if (regexEdit.continueMatching && regexEdit.blockPlayerAction == null)
+        Icons.KeyboardArrowDown
+    else
+        Icons.Stop
 
     if (!regexEdit.enabled) m += Icons.ToggleOff
 

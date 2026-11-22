@@ -7,7 +7,6 @@ import com.arn.scrobble.api.ScrobbleEverywhere
 import com.arn.scrobble.api.ScrobbleResult
 import com.arn.scrobble.api.lastfm.ScrobbleData
 import com.arn.scrobble.db.BlockedMetadata
-import com.arn.scrobble.utils.PanoNotifications
 import com.arn.scrobble.utils.PlatformStuff
 import com.arn.scrobble.utils.Stuff
 import com.arn.scrobble.utils.redactedMessage
@@ -17,34 +16,26 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withTimeoutOrNull
 import org.jetbrains.compose.resources.getString
 import pano_scrobbler.composeapp.generated.resources.Res
 import pano_scrobbler.composeapp.generated.resources.parse_error
 import pano_scrobbler.composeapp.generated.resources.scrobble_ignored
 import kotlin.math.min
+import kotlin.time.Duration.Companion.milliseconds
 
 
 class ScrobbleQueue(
     private val scope: CoroutineScope,
 ) {
-    class NetworkRequestNeededException(cause: Throwable? = null) :
-        IllegalStateException("Network request needed", cause)
-
     // delays scrobbling this hash until it becomes null again
     private var lockedHash: Int? = null
 
     private val tickEveryMs = 500L
 
     private val scrobbleTasks = mutableMapOf<Int, Job>()
-
-    private val fetchAdditionalMetadataTimestamps = ArrayDeque<Long>()
-    private val fetchAdditionalMetadataMutex = Mutex()
 
     // ticker, only handles empty messages and messagePQ
     // required because uptimeMillis pauses / slows down in deep sleep
@@ -70,25 +61,8 @@ class ScrobbleQueue(
         lockedHash = hash
     }
 
-    private suspend fun canFetchAdditionalMetadata() {
-        // was still getting java.util.NoSuchElementException: ArrayDeque is empty, so use lock
-        return fetchAdditionalMetadataMutex.withLock {
-            val now = System.currentTimeMillis()
-            // Remove timestamps older than n seconds
-            while (now - (fetchAdditionalMetadataTimestamps.firstOrNull() ?: now) > 1 * 60_000) {
-                fetchAdditionalMetadataTimestamps.removeFirstOrNull()
-            }
-            val can = fetchAdditionalMetadataTimestamps.size < 2
-            fetchAdditionalMetadataTimestamps.addLast(System.currentTimeMillis())
-
-            if (!can)
-                throw NetworkRequestNeededException()
-        }
-    }
-
     fun scrobble(
         trackInfo: PlayingTrackInfo,
-        appIsAllowListed: Boolean,
         delay: Long,
         timestampOverride: Long? = null,
     ) {
@@ -123,7 +97,6 @@ class ScrobbleQueue(
                 PlatformStuff.mainPrefs.data.map { it.submitNowPlaying }.first()
 
             // now playing for a new track or after that of the previously paused track has expired
-            var lastfmNpSucc = false
             if (
                 timestampOverride == null &&
                 submitNowPlaying &&
@@ -134,7 +107,7 @@ class ScrobbleQueue(
                 ))
             ) {
                 val npResults =
-                    withTimeoutOrNull(submitAtTime - PlatformStuff.monotonicTimeMs() - 5000) {
+                    withTimeoutOrNull((submitAtTime - PlatformStuff.monotonicTimeMs() - 5000).milliseconds) {
                         ScrobbleEverywhere.nowPlaying(sd)
                     }
 
@@ -148,11 +121,17 @@ class ScrobbleQueue(
 
                 trackInfo.nowPlayingSubmitted(msid)
 
-                if (msid != null)
+                val lastfmNpSucc = npResults?.any { (k, v) ->
+                    k.userAccount.type == AccountType.LASTFM && v.isSuccess
+                } == true
+
+                if (lastfmNpSucc && trackInfo.artUrlState == PlayingTrackInfo.ArtUrlState.None) {
+                    trackInfo.setArtUrlState(PlayingTrackInfo.ArtUrlState.CanFetch)
+                }
+
+                if (msid != null || PlatformStuff.isDesktop) {
                     notifyPlayingTrackEvent(trackInfo.toTrackPlayingEvent())
-
-
-                if (npResults != null && npResults.values.any { !it.isSuccess }) {
+                } else if (npResults != null && npResults.values.any { !it.isSuccess }) {
                     notifyScrobbleError(
                         notiKey = trackInfo.notiKey,
                         scrobbleResults = npResults,
@@ -160,52 +139,26 @@ class ScrobbleQueue(
                         hash = hash
                     )
                 }
-
-                lastfmNpSucc = npResults?.any { (k, v) ->
-                    k.userAccount.type == AccountType.LASTFM && v.isSuccess
-                } == true
-
             }
-
-            // discord rpc album art
-            val npArtFetchJob =
-                if (PlatformStuff.isDesktop &&
-                    PlatformStuff.mainPrefs.data.map { it.discordRpc.enabled }.first() &&
-                    lastfmNpSucc &&
-                    trackInfo.artUrl == null
-                ) {
-                    launch(Dispatchers.IO) {
-                        if (shouldFetchNpArtUrl().firstOrNull { it } == true) {
-                            val additionalMetadata = ScrobbleEverywhere.fetchAdditionalMetadata(
-                                scrobbleData,
-                                ::canFetchAdditionalMetadata,
-                                true,
-                            )
-
-                            if (additionalMetadata.artUrl != null) {
-                                Logger.d { "fetched artUrl for now playing: ${additionalMetadata.artUrl}" }
-                                trackInfo.setArtUrl(additionalMetadata.artUrl)
-                                notifyPlayingTrackEvent(trackInfo.toTrackPlayingEvent())
-                            }
-                        }
-                    }
-                } else
-                    null
 
             // tick every n milliseconds
+            var prevLockedHash: Int? = null
             while (submitAtTime > PlatformStuff.monotonicTimeMs() || hash == lockedHash) {
-                delay(tickEveryMs)
+                if (hash == lockedHash)
+                    prevLockedHash = lockedHash
+
+                delay(tickEveryMs.milliseconds)
             }
 
-            npArtFetchJob?.cancel()
+            if (trackInfo.hash == prevLockedHash && !trackInfo.isPlaying)
+                return@coroutineScope
 
             // launch it in a separate scope, so that it does not get cancelled
             scope.launch(Dispatchers.IO) {
                 val scrobbleSd = if (fetchAdditionalMetadata) {
-                    val additionalMetadata = ScrobbleEverywhere.fetchAdditionalMetadata(
-                        scrobbleData,
-                        { }
-                    )
+                    val additionalMetadata = ScrobbleEverywhere.fetchMissingMetadata(
+                        scrobbleData
+                    ) { true }
 
                     ScrobbleEverywhere.preprocessMetadata(
                         additionalMetadata.scrobbleData ?: scrobbleData,
@@ -232,21 +185,12 @@ class ScrobbleQueue(
             )
         )
 
-        if (!appIsAllowListed) {
-            scope.launch {
-                PanoNotifications.notifyAppDetected(
-                    trackInfo.appId,
-                    PlatformStuff.loadApplicationLabel(trackInfo.appId)
-                )
-            }
-        }
-
         prune()
         scrobbleTasks[trackInfo.hash]?.cancel()
         scrobbleTasks[trackInfo.hash] = scope.launch(Dispatchers.IO) {
             // some players put the previous song and then switch to the current song in like 150ms
             // potentially wasting an api call. sleep and throw cancellation exception in that case
-            delay(Stuff.META_WAIT)
+            delay(Stuff.META_WAIT.milliseconds)
 
             if (trackInfo.scrobbledState in
                 PlayingTrackInfo.ScrobbledState.PREPROCESSED..PlayingTrackInfo.ScrobbledState.NOW_PLAYING_SUBMITTED
@@ -258,12 +202,9 @@ class ScrobbleQueue(
                 return@launch
             }
 
-            val additionalMeta = ScrobbleEverywhere.fetchAdditionalMetadata(
-                scrobbleData,
-                ::canFetchAdditionalMetadata
-            )
+            val additionalMeta = ScrobbleEverywhere.fetchMissingMetadata(scrobbleData)
 
-            val preprocessResult = ScrobbleEverywhere.preprocessMetadata(
+            var preprocessResult = ScrobbleEverywhere.preprocessMetadata(
                 additionalMeta.scrobbleData ?: scrobbleData,
                 trackInfo.normalizedUrlHost
             )
@@ -297,18 +238,32 @@ class ScrobbleQueue(
                 }
 
                 else -> {
+                    var artUrl = additionalMeta.artUrl
+
+                    if (preprocessResult.canFetchAlbum) {
+                        val additionalMetaAlbumGuess = ScrobbleEverywhere.guessAlbumFromCacheLastfm(
+                            preprocessResult.scrobbleData,
+                        )
+
+                        preprocessResult = if (additionalMetaAlbumGuess.scrobbleData != null)
+                            preprocessResult.copy(scrobbleData = additionalMetaAlbumGuess.scrobbleData)
+                        else
+                            preprocessResult
+
+                        artUrl = artUrl ?: additionalMetaAlbumGuess.artUrl
+                    }
+
                     trackInfo.putPreprocessedData(
                         preprocessResult.scrobbleData,
                         preprocessResult.userLoved,
                         !additionalMeta.shouldFetchAgain
                     )
 
-                    if (additionalMeta.artUrl != null) {
-                        trackInfo.setArtUrl(additionalMeta.artUrl)
+                    if (artUrl != null) {
+                        trackInfo.setArtUrlState(PlayingTrackInfo.ArtUrlState(artUrl))
                     }
 
                     notifyPlayingTrackEvent(
-
                         trackInfo.toTrackPlayingEvent().copy(
                             origScrobbleData = additionalMeta.scrobbleData ?: origScrobbleData,
                             nowPlaying = true,

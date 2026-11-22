@@ -6,8 +6,14 @@ PACKAGE=com.arn.scrobble
 # Define the URL of the GitHub repository
 REPO_URL="https://api.github.com/repos/$USER/$REPO/releases"
 
+CURL_ARGS=(--silent --fail-with-body)
+if [ -n "$GH_TOKEN" ]; then
+  CURL_ARGS+=(-H "Authorization: Bearer $GH_TOKEN")
+fi
+CURL_ARGS+=(-H "Accept: application/vnd.github+json")
+
 # Use curl to get the JSON response for all releases
-JSON=$(curl --silent --fail-with-body "$REPO_URL")
+JSON=$(curl "${CURL_ARGS[@]}" "$REPO_URL")
 
 # Extract the URLs of the assets named "pano-scrobbler-release.apk", the corresponding tags, the created_at dates
 readarray -t TAGS < <(jq -r '.[0:3][] | .tag_name' <<<"$JSON")
@@ -21,9 +27,9 @@ readarray -t ASSET_URLS < <(
 
 readarray -t DATES < <(jq -r '.[0:3][] | .created_at' <<<"$JSON")
 
-# Download the last 3 assets and create the changelogs
+# Download the last 2 assets and create the changelogs
 mkdir -p "metadata/${PACKAGE}/en-US/changelogs"
-for ((i=0; i<${#ASSET_URLS[@]} && i<3; i++)); do
+for ((i=0; i<${#ASSET_URLS[@]} && i<2; i++)); do
     curl -L --create-dirs -o "repo/${REPO}-${TAGS[$i]}.apk" "${ASSET_URLS[$i]}"
     touch -d "${DATES[$i]}" "repo/${REPO}-${TAGS[$i]}.apk"
     CHANGELOG=$(echo "$JSON" | jq -r ".[$i] | .body")
@@ -39,10 +45,8 @@ cp ../../fastlane/metadata/android/en-US/images/phoneScreenshots/4-details-mobil
 cp ../../fastlane/metadata/android/en-US/images/phoneScreenshots/5-random-mobile.jpg "metadata/${PACKAGE}/en-US/phoneScreenshots/"
 
 # copy icon
-cp ../../fastlane/metadata/android/en-US/images/icon.png "metadata/${PACKAGE}/en-US/icon.png"
+cp ../../fastlane/metadata/android/en-US/images/icon.png metadata/${PACKAGE}/en-US/
+cp ../../fastlane/metadata/android/en-US/images/icon.png .
 
 # Run fdroid update
 fdroid update --create-metadata --use-date-from-apk
-
-# Replace the default icon
-cp ../../fastlane/metadata/android/en-US/images/icon.png repo/icons/icon.png
