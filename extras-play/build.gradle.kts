@@ -1,7 +1,9 @@
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
-
 plugins {
     alias(libs.plugins.android.library)
+}
+
+kotlin {
+    jvmToolchain(25)
 }
 
 android {
@@ -17,21 +19,14 @@ android {
 
         consumerProguardFiles("consumer-rules.pro")
     }
-
+    lint {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(25)
+        }
+    }
     buildTypes {
         create("releaseGithub") {
             matchingFallbacks += listOf("release")
-        }
-    }
-
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_21
-        targetCompatibility = JavaVersion.VERSION_21
-    }
-
-    kotlin {
-        compilerOptions {
-            jvmTarget = JvmTarget.JVM_21
         }
     }
 }
@@ -42,10 +37,16 @@ dependencies {
     implementation(libs.core)
     implementation(libs.startup)
 
+    implementation(libs.play.services.base)
     implementation(libs.billing)
     implementation(libs.review)
     implementation(libs.kermit)
     implementation(platform(libs.firebase.bom))
     implementation(libs.crashlytics)
     implementation(projects.extrasCommon)
+}
+
+configurations.all {
+    // play services pulls this
+    exclude(group = "androidx.fragment", module = "fragment")
 }

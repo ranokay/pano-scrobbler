@@ -1,1 +1,4 @@
+check_circle
+expand_circle_down
+expand_circle_up
 favorite

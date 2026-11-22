@@ -2,15 +2,17 @@ import com.android.build.gradle.internal.cxx.configure.gradleLocalProperties
 import com.codingfeline.buildkonfig.compiler.FieldSpec.Type.BOOLEAN
 import com.codingfeline.buildkonfig.compiler.FieldSpec.Type.INT
 import com.codingfeline.buildkonfig.compiler.FieldSpec.Type.STRING
-import com.google.gson.Gson
-import com.mikepenz.aboutlibraries.plugin.DuplicateMode
-import com.mikepenz.aboutlibraries.plugin.StrictMode
-import org.jetbrains.compose.desktop.application.dsl.TargetFormat
-import org.jetbrains.compose.reload.gradle.ComposeHotRun
+import groovy.json.JsonSlurper
 import java.io.IOException
-import java.net.HttpURLConnection
 import java.net.URI
-import java.security.MessageDigest
+import java.net.http.HttpClient
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import java.time.Duration
+import java.time.OffsetDateTime
+import java.time.ZoneOffset
+import java.util.Locale
+import java.util.zip.GZIPInputStream
 import javax.xml.parsers.DocumentBuilderFactory
 import kotlin.io.encoding.Base64
 
@@ -21,43 +23,32 @@ plugins {
     alias(libs.plugins.compose.compiler)
     alias(libs.plugins.ksp)
     alias(libs.plugins.room)
-    alias(libs.plugins.aboutlibraries)
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.buildkonfig)
 }
 
-val os = org.gradle.internal.os.OperatingSystem.current()!!
-val arch = System.getProperty("os.arch")!!
-
-val archAmd64 = arrayOf("amd64", "x86_64")
-val archArm64 = arrayOf("aarch64", "arm64")
-
 val isReleaseBuild = gradle.startParameter.taskNames.any {
-    it.contains("proguard", ignoreCase = true) || it.contains("release", ignoreCase = true) ||
-            it.contains("packageUberJarForCurrentOS", ignoreCase = true)
-}
-val resourcesDirName = when {
-    os.isMacOsX && arch in archAmd64 -> "macos-x64"
-    os.isMacOsX && arch in archArm64 -> "macos-arm64"
-    os.isLinux && arch in archAmd64 -> "linux-x64"
-    os.isLinux && arch in archArm64 -> "linux-arm64"
-    os.isWindows && arch in archAmd64 -> "windows-x64"
-    os.isWindows && arch in archArm64 -> "windows-arm64"
-    else -> throw IllegalStateException("Unsupported platform: $os $arch")
+    it.contains("release", ignoreCase = true) ||
+            it.contains("packageUberJarForCurrentOS", ignoreCase = true) ||
+            it.contains("packageNativeImage", ignoreCase = true)
 }
 
-val APP_ID: String by rootProject.extra
-val VER_CODE: Int by rootProject.extra
-val VER_NAME: String by rootProject.extra
-val APP_NAME: String by rootProject.extra
-val APP_NAME_NO_SPACES: String by rootProject.extra
+val APP_ID = rootProject.extra["APP_ID"] as String
+val VER_CODE = rootProject.extra["VER_CODE"] as Int
+val VER_NAME = rootProject.extra["VER_NAME"] as String
+val APP_NAME = rootProject.extra["APP_NAME"] as String
+val APP_NAME_NO_SPACES = rootProject.extra["APP_NAME_NO_SPACES"] as String
+val RESOURCES_DIR_NAME = rootProject.extra["RESOURCES_DIR_NAME"] as String
+val IS_WINDOWS = rootProject.extra["IS_WINDOWS"] as Boolean
+val IS_LINUX = rootProject.extra["IS_LINUX"] as Boolean
+
 val localProperties = gradleLocalProperties(rootDir, project.providers)
-    .map { it.key to it.value.toString() }
-    .toMap()
 
 kotlin {
     compilerOptions {
         freeCompilerArgs.add("-Xreturn-value-checker=check")
+        freeCompilerArgs.add("-opt-in=kotlinx.coroutines.ExperimentalCoroutinesApi")
+        freeCompilerArgs.add("-opt-in=kotlinx.coroutines.FlowPreview")
     }
 
     android {
@@ -73,16 +64,22 @@ kotlin {
             enable = true
         }
 
+        lint {
+            toolchain {
+                languageVersion = JavaLanguageVersion.of(25)
+            }
+        }
+
         withHostTest {}
     }
 
-    jvm("desktop")
+    jvm()
+    jvmToolchain(25)
 
     sourceSets {
-        val desktopMain by getting
 
         androidMain.dependencies {
-//            implementation(libs.core)
+            implementation(libs.core)
             implementation(libs.kotlinx.coroutines.android)
             implementation(libs.activity.compose)
             implementation(libs.work.runtime)
@@ -90,55 +87,54 @@ kotlin {
             implementation(libs.coil.gif)
             implementation(libs.qrcode)
             implementation(libs.webkit)
+            implementation(libs.navigation.event.android) // todo predictive back crash fix, remove when they update
             implementation(projects.extrasAndroid)
         }
 
-        commonMain {
-            dependencies {
-                implementation(libs.kotlin.stdlib)
-                implementation(libs.kotlinx.coroutines.core)
-                implementation(libs.runtime)
-                implementation(libs.foundation)
-                implementation(libs.material3)
-                implementation(libs.ui)
-                implementation(libs.resources)
-                implementation(libs.tooling.preview)
-                implementation(libs.kotlinx.serialization.json)
-                implementation(libs.lifecycle.viewmodel.nav3)
-                implementation(libs.lifecycle.viewmodel)
-                implementation(libs.lifecycle.runtime)
-                implementation(libs.coil.compose)
-                implementation(libs.coil.network.ktor)
-                implementation(libs.ktor.client.core)
-                implementation(libs.ktor.serialization.kotlinx.json)
-                implementation(libs.ktor.client.auth)
-                implementation(libs.ktor.client.content.negotiation)
-                implementation(libs.ktor.client.okhttp)
-                implementation(libs.okhttp)
-                implementation(libs.aboutlibraries.core)
-                implementation(libs.kotlin.csv.jvm)
-                implementation(libs.kermit)
-                implementation(libs.datastore.core)
-                implementation(libs.paging.common)
-                implementation(libs.paging.compose)
-                implementation(libs.nav3.ui)
-                implementation(libs.adaptive)
-                implementation(libs.adaptive.layout)
-                implementation(libs.adaptive.nav3)
-                implementation(libs.koalaplot.core)
-                implementation(libs.nanohttpd)
-                implementation(libs.room.runtime)
-                implementation(libs.cryptohash)
-                implementation(projects.extrasCommon)
-            }
+        commonMain.dependencies {
+            implementation(libs.kotlin.stdlib)
+            implementation(libs.kotlinx.coroutines.core)
+            implementation(libs.runtime)
+            implementation(libs.foundation)
+            implementation(libs.material3)
+            implementation(libs.ui)
+            implementation(libs.resources)
+            implementation(libs.tooling.preview)
+            implementation(libs.kotlinx.serialization.json)
+            implementation(libs.lifecycle.viewmodel.navigation3)
+            implementation(libs.lifecycle.viewmodel)
+            implementation(libs.lifecycle.runtime)
+            implementation(libs.coil.compose)
+            implementation(libs.coil.network.ktor)
+            implementation(libs.ktor.client.core)
+            implementation(libs.ktor.serialization.kotlinx.json)
+            implementation(libs.ktor.client.auth)
+            implementation(libs.ktor.client.content.negotiation)
+            implementation(libs.ktor.client.okhttp)
+            implementation(libs.okhttp)
+            implementation(libs.aboutlibraries.core)
+            implementation(libs.kotlin.csv)
+            implementation(libs.kermit)
+            implementation(libs.datastore.core)
+            implementation(libs.paging.common)
+            implementation(libs.paging.compose)
+            implementation(libs.navigation3.ui)
+            implementation(libs.adaptive)
+            implementation(libs.adaptive.layout)
+            implementation(libs.adaptive.nav3)
+            implementation(libs.koalaplot.core)
+            implementation(libs.nanohttpd)
+            implementation(libs.room.runtime)
+            implementation(libs.cryptohash)
+            implementation(projects.extrasCommon)
+            implementation(projects.materialColorUtilities)
         }
 
         commonTest.dependencies {
             implementation(kotlin("test"))
         }
 
-        desktopMain.dependencies {
-            implementation(compose.desktop.currentOs)
+        jvmMain.dependencies {
             implementation(libs.kotlinx.coroutines.swing)
             implementation(projects.extrasNonplay)
             implementation(libs.sqlite.bundled)
@@ -153,9 +149,8 @@ kotlin {
 
 
 dependencies {
-//    "baselineProfile"(projects.baselineprofile)
     add("kspAndroid", libs.room.compiler)
-    add("kspDesktop", libs.room.compiler)
+    add("kspJvm", libs.room.compiler)
     "androidRuntimeClasspath"(libs.tooling)
 }
 
@@ -191,13 +186,13 @@ buildkonfig {
         buildConfigField(STRING, "VER_NAME", VER_NAME, const = true)
         buildConfigField(BOOLEAN, "DEBUG", (!isReleaseBuild).toString(), const = true)
 
-        val lastfmKey = localProperties["lastfm.key"]
+        val lastfmKey = localProperties.getProperty("lastfm.key")
             ?: throw IllegalStateException("lastfm.key not found in local.properties")
 
-        val lastfmSecret = localProperties["lastfm.secret"]
+        val lastfmSecret = localProperties.getProperty("lastfm.secret")
             ?: throw IllegalStateException("lastfm.secret not found in local.properties")
 
-        val spotifyRefreshToken = localProperties["spotify.refreshToken"]
+        val spotifyRefreshToken = localProperties.getProperty("spotify.refreshToken")
             ?: throw IllegalStateException("spotify.refreshToken not found in local.properties")
 
         buildConfigField(
@@ -227,612 +222,286 @@ buildkonfig {
 //            buildConfigField(STRING, "nullableField", "NonNull-value", nullable = true)
         }
 
-        create("desktop") {
-            buildConfigField(
-                INT, "OS_ORDINAL",
-                when {
-                    os.isWindows -> "0"
-                    os.isMacOsX -> "1"
-                    os.isLinux -> "2"
-                    else -> throw IllegalStateException("Unsupported OS: $os")
-                }, const = true
-            )
-
-            buildConfigField(STRING, "OS_ARCH", resourcesDirName, const = true)
+        create("jvm") {
+            buildConfigField(BOOLEAN, "IS_WINDOWS", IS_WINDOWS.toString(), const = true)
+            buildConfigField(BOOLEAN, "IS_LINUX", IS_LINUX.toString(), const = true)
+            buildConfigField(STRING, "OS_ARCH", RESOURCES_DIR_NAME, const = true)
         }
-    }
-}
-
-aboutLibraries {
-    offlineMode = true
-    collect {
-        configPath = File("../aboutLibsConfig")
-        fetchRemoteLicense = false
-        fetchRemoteFunding = false
-        license.strictMode = StrictMode.WARN
-        library.duplicationMode = DuplicateMode.MERGE
-    }
-
-    export {
-        excludeFields = listOf(
-            "developers",
-            "funding",
-            "description",
-            "organization",
-            "content",
-            "connection",
-            "developerConnection"
-        )
-    }
-
-    exports {
-        create("desktop") {
-            outputFile = file("src/desktopMain/composeResources/files/aboutlibraries.json")
-        }
-    }
-
-}
-
-compose.desktop {
-    application {
-        mainClass = "com.arn.scrobble.main.MainKt"
-
-        val libraryPathRel = if (isReleaseBuild)
-            "\$APPDIR/resources"
-        else
-            File(
-                project.layout.projectDirectory.dir("resources").asFile,
-                resourcesDirName
-            ).absolutePath
-
-        val libraryPath = File(libraryPathRel).absolutePath
-
-        // ZGC starts with ~70MB minimized and goes down to ~160MB after re-minimizing
-        jvmArgs += listOfNotNull(
-            "-Dpano.native.components.path=$libraryPath",
-            "--enable-native-access=ALL-UNNAMED",
-            if (os.isLinux) "--add-opens=java.desktop/sun.awt.X11=ALL-UNNAMED" else null,
-            "-Dfile.encoding=UTF-8",
-            "-Dnative.encoding=UTF-8",
-//            "-XX:NativeMemoryTracking=detail",
-            "-XX:+UseSerialGC",
-            "-XX:+UseAdaptiveSizePolicy",
-//            "-XX:+UseZGC",
-//            "-XX:ZUncommitDelay=60",
-            "-XX:+UseStringDeduplication",
-            "-Xms32m",
-            "-Xmx512m",
-        )
-
-//        args += "-m"
-
-        nativeDistributions {
-            val formats = when {
-                os.isWindows -> mutableSetOf(TargetFormat.AppImage)
-                os.isLinux -> mutableSetOf(TargetFormat.AppImage)
-                os.isMacOsX -> mutableSetOf(TargetFormat.Dmg)
-                else -> throw IllegalStateException("Unsupported OS: $os")
-            }
-
-            targetFormats = formats
-            packageVersion = VER_NAME
-            vendor = "kawaiiDango"
-            packageName = APP_NAME_NO_SPACES
-
-            appResourcesRootDir = project.layout.projectDirectory.dir("resources")
-
-            windows {
-                dirChooser = true
-                upgradeUuid = "85173f4e-ca52-4ec9-b77f-c2e0b1ff4209"
-                msiPackageVersion = packageVersion
-                exePackageVersion = packageVersion
-                menuGroup = APP_NAME
-                description = APP_NAME_NO_SPACES
-                iconFile = file("app-icons/pano-scrobbler.ico")
-            }
-
-            linux {
-                menuGroup = APP_NAME_NO_SPACES
-                description = APP_NAME_NO_SPACES
-                iconFile = file("app-icons/pano-scrobbler.png")
-            }
-
-            macOS {
-                bundleID = APP_ID
-                packageName = APP_NAME
-                dockName = APP_NAME
-                description = APP_NAME
-                appStore = false
-
-                iconFile = file("app-icons/pano-scrobbler.icns")
-            }
-        }
-
-//        buildTypes.release {
-//            proguard {
-//                obfuscate = false
-//                optimize = false
-//                joinOutputJars = true
-//                configurationFiles.from(project.file("proguard-rules-desktop.pro"))
-//            }
-//        }
-    }
-}
-
-tasks.withType<ComposeHotRun>().configureEach {
-    val libraryPath =
-        File(project.layout.projectDirectory.dir("resources").asFile, resourcesDirName).absolutePath
-
-    isAutoReloadEnabled = true
-    mainClass = "com.arn.scrobble.main.MainKt"
-    jvmArgs = (jvmArgs.orEmpty()) + listOfNotNull(
-        "-Dpano.native.components.path=$libraryPath",
-        "--enable-native-access=ALL-UNNAMED",
-        if (os.isLinux) "--add-opens=java.desktop/sun.awt.X11=ALL-UNNAMED" else null,
-    )
-    val appDataRoot = when {
-        os.isWindows -> {
-            System.getenv("APPDATA")?.ifEmpty { null }
-                ?: System.getProperty("user.home")
-        }
-
-        os.isLinux -> {
-            System.getenv("XDG_DATA_HOME")?.ifEmpty { null }
-                ?: (System.getProperty("user.home") + "/.local/share")
-        }
-
-        os.isMacOsX -> {
-            System.getProperty("user.home") + "/Library/Application Support"
-        }
-
-        else -> throw IllegalStateException("unsupported os")
-    }
-
-    val appDataDir = File(appDataRoot, "$APP_NAME_NO_SPACES-debug").absolutePath
-    args = listOf("--data-dir", appDataDir)
-}
-
-tasks.register<DefaultTask>("generateSha256") {
-    val distDir = file("../dist")
-
-    doLast {
-        distDir.listFiles { file ->
-            file.isFile && !file.name.endsWith(".sha256") && !file.name.endsWith(".txt")
-        }?.map { file ->
-            val digest = MessageDigest.getInstance("SHA-256")
-            file.inputStream().use { fis ->
-                val buffer = ByteArray(8192)
-                var bytesRead: Int
-                while (fis.read(buffer).also { bytesRead = it } != -1) {
-                    digest.update(buffer, 0, bytesRead)
-                }
-            }
-            val hash = digest.digest().joinToString("") { "%02x".format(it) }
-            "$hash  ${file.name}"
-        }?.let {
-            val text = it.joinToString("\n")
-            val sumFile = File(distDir, "sha256sums.txt")
-            sumFile.writeText(text)
-
-            println("sha256sums.txt generated")
-        }
-    }
-}
-
-tasks.register<Copy>("copyReleaseDmg") {
-    val fileName = "$APP_NAME_NO_SPACES-$resourcesDirName.dmg"
-    from("build/compose/binaries/main-release/dmg")
-    into("../dist")
-    include("*.dmg")
-    rename(
-        "(.*).dmg",
-        fileName
-    )
-}
-
-tasks.register<Exec>("packageInno") {
-    val executableDir = file("build/compose/native/$resourcesDirName")
-    val distDir = file("../dist")
-    val scriptFile = file("inno/installer.iss")
-    val iconFile = file("app-icons/pano-scrobbler.ico")
-    val isccPath = System.getenv("PROGRAMFILES(x86)") + "\\Inno Setup 6\\ISCC.exe"
-
-    doFirst {
-        distDir.mkdirs()
-    }
-
-    commandLine(
-        isccPath,
-        "/DOUT_DIR=" + distDir.absolutePath,
-        "/DAPP_DIR=" + executableDir.absolutePath,
-        "/DVERSION=$VER_NAME",
-        "/DICON_FILE=" + iconFile.absolutePath,
-        scriptFile.absolutePath
-    )
-}
-
-tasks.register<Exec>("packageLinuxAppImageAndTarball") {
-    commandLine(
-        "bash",
-        "../package-for-linux.sh",
-    )
-}
-
-tasks.register<Exec>("generateRc") {
-    if (!os.isWindows) return@register
-
-    val rcTemplateFile = file("rc-template.txt")
-    val rcOutputDir = project.layout.buildDirectory.dir("generated-rc").get().asFile
-    val icoFilePath = file("app-icons/pano-scrobbler.ico").absolutePath
-        .replace("\\", "\\\\") // escape backslashes for rc compiler
-    val outputFileName = "$APP_NAME_NO_SPACES.exe"
-    val rcOut = File(rcOutputDir, "$outputFileName.rc")
-    val versionMajor = VER_NAME.substringBefore(".")
-    val versionMinor = VER_NAME.substringAfter(".")
-
-    // find rc.exe
-    val rcExe = File(System.getenv("PROGRAMFILES(x86)") + "\\Windows Kits\\10\\bin")
-        .listFiles()
-        ?.filter { it.isDirectory && it.name.startsWith("10.") }
-        ?.maxByOrNull { it.lastModified() }
-        ?.let { File(it, "x64\\rc.exe") }
-        ?.absolutePath
-
-    if (rcExe == null)
-        throw GradleException("rc.exe not found. Please install Windows 10 SDK.")
-
-    // compile rc to res
-    val command = listOf(
-        rcExe,
-        "/nologo",
-        rcOut.absolutePath
-    )
-
-    commandLine(command)
-
-    doFirst {
-        val fileType = "0x1"
-
-        val iconInfo = "IDI_ICON_1 ICON \"$icoFilePath\""
-
-        val rcContent = rcTemplateFile
-            .readText()
-            .replace("\$versionMajor", versionMajor)
-            .replace("\$versionMinor", versionMinor)
-            .replace("\$fileName", outputFileName)
-            .replace("\$fileType", fileType)
-            .replace("\$iconInfo", iconInfo)
-
-        rcOutputDir.mkdirs()
-        rcOut.writeText(rcContent)
-    }
-}
-
-// graalvm plugin doesn't seem to support this project structure, so directly use the command
-tasks.register<Exec>("buildNativeImage") {
-    val graalvmHome = System.getenv("GRAALVM_HOME")
-    val javaHome = System.getenv("JAVA_HOME")
-    val copyDesktopAndIcon = os.isLinux
-
-    val jarFile =
-        file("build/compose/jars/$APP_NAME_NO_SPACES-$resourcesDirName-$VER_NAME.jar")
-    val jarTree = zipTree(jarFile)
-    val jarFilesToExtract = if (os.isWindows && arch in archAmd64)
-        arrayOf("skiko-windows-x64.dll", "icudtl.dat", "natives/windows_x64/sqliteJni.dll")
-    else if (os.isLinux && arch in archAmd64)
-        arrayOf("libskiko-linux-x64.so", "natives/linux_x64/libsqliteJni.so")
-    else if (os.isLinux && arch in archArm64)
-        arrayOf("libskiko-linux-arm64.so", "natives/linux_arm64/libsqliteJni.so")
-    else
-        arrayOf()
-
-    val outputDir = file("build/compose/native/$resourcesDirName")
-    val outputFile = File(outputDir, APP_NAME_NO_SPACES)
-
-    val reachabilityFiles = file(
-        "rechability-metadata/" + if (os.isWindows) "windows" else "linux"
-    )
-    val jawtDirName = if (os.isWindows)
-        "bin"
-    else
-        "lib"
-    val jawtDir = File(outputDir, jawtDirName)
-    val jawtFile = when {
-        os.isWindows -> file("$graalvmHome/bin/jawt.dll")
-        os.isLinux -> file("$graalvmHome/lib/libjawt.so")
-        else -> throw IllegalStateException("Unsupported OS: $os")
-    }
-
-    val winAppResFile =
-        project.layout.buildDirectory.file("generated-rc/$APP_NAME_NO_SPACES.exe.res")
-
-    val nativeLibsDir = file("resources/$resourcesDirName/")
-    val iconFile = file("src/desktopMain/composeResources/drawable/ic_launcher_with_bg.svg")
-    val desktopFile = file("$APP_NAME_NO_SPACES.desktop")
-    val licenseFile = file("../LICENSE")
-    val distDir = file("../dist")
-
-    inputs.file(jarFile)
-    inputs.dir(nativeLibsDir)
-    inputs.dir(reachabilityFiles)
-    inputs.file(licenseFile)
-
-    outputs.dir(outputDir)
-
-    val command = listOfNotNull(
-        if (os.isWindows)
-            "$graalvmHome\\bin\\native-image.cmd"
-        else
-            "$graalvmHome/bin/native-image",
-        "--no-fallback",
-//        "-march=" + if (arch in archArm64) "armv8.1-a" else "x86-64-v2",
-        if (arch in archAmd64) "-march=x86-64-v2" else null,
-        if (os.isLinux && arch in archArm64) "-H:PageSize=16384" else null,
-        if (os.isLinux) "--add-opens=java.desktop/sun.awt.X11=ALL-UNNAMED" else null,
-        "-H:+UnlockExperimentalVMOptions",
-        "-J-Djava.awt.headless=false",
-        "-J-Dfile.encoding=UTF-8",
-        "-J-Dnative.encoding=UTF-8",
-        "-J-Dsun.java2d.dpiaware=true",
-        "-H:ConfigurationFileDirectories=" + reachabilityFiles.absolutePath,
-        "-R:MaxHeapSize=300M",
-        "--initialize-at-build-time=kotlin.text.Charsets",
-        "-H:+AddAllCharsets",
-        "-H:+ReportExceptionStackTraces",
-//        "-g",
-//        "--enable-monitoring=nmt",
-        "--enable-native-access=ALL-UNNAMED",
-        "--include-locales",
-//        "--install-exit-handlers",
-        // I use trustStoreType=Windows-ROOT at runtime
-        if (os.isWindows) "-J-Djavax.net.ssl.trustStore=NONE" else null,
-        if (os.isWindows) "-H:NativeLinkerOption=/SUBSYSTEM:WINDOWS" else null,
-        if (os.isWindows) "-H:NativeLinkerOption=/ENTRY:mainCRTStartup" else null,
-        if (os.isWindows) "-H:NativeLinkerOption=\"${winAppResFile.get().asFile.absolutePath}\"" else null,
-        "-jar",
-        jarFile.absolutePath,
-        "-o",
-        outputFile.absolutePath,
-    )
-
-    commandLine(command)
-
-    doFirst {
-        // env check
-        if (graalvmHome.isNullOrEmpty() || graalvmHome != javaHome) {
-            throw GradleException("GRAALVM_HOME should be set and should be equal to JAVA_HOME")
-        }
-        outputDir.mkdirs()
-        distDir.mkdirs()
-    }
-
-    doLast {
-//        println("Executing command:")
-//        println(command.joinToString(" "))
-        // copy jawt
-        jawtDir.mkdirs()
-        jawtFile.copyTo(File(jawtDir, jawtFile.name), overwrite = true)
-
-        val otherJawtFile = File(outputDir, jawtFile.name)
-        if (otherJawtFile.exists())
-            otherJawtFile.delete()
-
-        // copy native components
-        nativeLibsDir.copyRecursively(
-            outputDir,
-            overwrite = true
-        )
-
-        // extract jni libraries from .jar
-        jarTree.matching {
-            include(*jarFilesToExtract)
-        }.forEach { file ->
-            file.copyTo(File(jawtDir, file.name), overwrite = true)
-        }
-
-        licenseFile.copyTo(File(outputDir, licenseFile.name), overwrite = true)
-
-        // copy icon and desktop file on linux
-        if (copyDesktopAndIcon) {
-            iconFile.copyTo(File(outputDir, "pano-scrobbler.svg"), overwrite = true)
-            desktopFile.copyTo(File(outputDir, desktopFile.name), overwrite = true)
-        }
-    }
-
-    if (os.isWindows) {
-        dependsOn("generateRc")
     }
 }
 
 tasks.register("updateMaterialSymbols") {
-    val symbolsDir = layout.buildDirectory.dir("material-symbols-svgs").get().asFile
+    val symbolsDir = layout.buildDirectory.dir("material-symbols").get().asFile
     outputs.dir(symbolsDir)
 
     val unfilledNamesFile = file("material-symbols-names/unfilled.txt")
     val filledNamesFile = file("material-symbols-names/filled.txt")
     val automirroredNamesFile = file("material-symbols-names/automirrored.txt")
+    val filledAutomirroredNamesFile = file("material-symbols-names/filled_automirrored.txt")
 
     inputs.files(
         unfilledNamesFile,
         filledNamesFile,
-        automirroredNamesFile
+        automirroredNamesFile,
+        filledAutomirroredNamesFile
     )
 
     doLast {
+        val httpClient = HttpClient.newHttpClient()
+        var count = 0
+
         fun buildUrl(iconName: String, filled: Boolean): String {
-            val fillName = if (filled) "fill1" else "default"
-            val variantName = "rounded"
-            // Google Fonts official CDN
-            return "https://fonts.gstatic.com/s/i/short-term/release/materialsymbols$variantName/$iconName/$fillName/24px.svg"
+            val fill = if (filled) 1 else 0
+            // Google Fonts official CDN, these are always gzipped
+            return "https://fonts.gstatic.com/render/v1/Material+Symbols+Rounded/24dp/$iconName.kt?var=opsz,wght,FILL,GRAD,ROND@24,400,$fill,0,50"
         }
 
         fun downloadBatch(
             iconNames: List<String>,
             filled: Boolean,
-            outputDir: File
+            autoMirrored: Boolean,
         ) {
             iconNames.forEach { iconName ->
                 val url = buildUrl(iconName, filled)
-                val iconFile = File(outputDir, "$iconName.svg")
-                URI(url).toURL().openStream().use { input ->
+                val fileNameSuffix =
+                    (if (filled) " filled" else "") + (if (autoMirrored) " autoMirrored" else "")
+                val iconFile = File(symbolsDir, "$iconName$fileNameSuffix.kt")
+
+                val request = HttpRequest.newBuilder(URI(url))
+                    .GET()
+                    .setHeader("Accept-Encoding", "gzip")
+                    .build()
+
+                val response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream())
+
+                val contentEncoding = response.headers().firstValue("Content-Encoding").orElse("")
+
+                val inputStream = if (contentEncoding.equals("gzip", ignoreCase = true)) {
+                    GZIPInputStream(response.body())
+                } else {
+                    response.body()
+                }
+
+                inputStream.use { input ->
                     iconFile.outputStream().use { output ->
                         input.copyTo(output)
                     }
                 }
-                println("Downloaded: $iconName")
+
+                count++
             }
         }
 
         downloadBatch(
-            unfilledNamesFile
-                .readLines().distinct(),
+            unfilledNamesFile.readLines().distinct(),
             filled = false,
-            symbolsDir
+            autoMirrored = false,
         )
 
         downloadBatch(
             filledNamesFile.readLines().distinct(),
             filled = true,
-            File(symbolsDir, "filled").also { it.mkdir() }
+            autoMirrored = false,
         )
 
         downloadBatch(
             automirroredNamesFile.readLines().distinct(),
             filled = false,
-            File(symbolsDir, "automirrored").also { it.mkdir() }
+            autoMirrored = true,
         )
 
-        println("Material Symbols download completed.")
+        downloadBatch(
+            filledAutomirroredNamesFile.readLines().distinct(),
+            filled = true,
+            autoMirrored = true,
+        )
+
+        println("Downloaded: $count icons")
     }
 }
 
-tasks.register<Exec>("convertMaterialSymbols") {
-    val inputDir = layout.buildDirectory.dir("material-symbols-svgs").get().asFile
+tasks.register("processMaterialSymbols") {
+    val inputDir = layout.buildDirectory.dir("material-symbols").get().asFile
     val outputDir = file("src/commonMain/kotlin/com/arn/scrobble/icons")
-    val cliPath = file(
-        "valkyrie-cli/bin/valkyrie" +
-                (if (os.isWindows) ".bat" else "")
-    )
+    val pkgName = "$APP_ID.icons"
 
-    val pkgName = APP_ID + ".icons"
+    doLast {
+        val inputFiles = inputDir.listFiles { file ->
+            file.isFile && file.extension == "kt"
+        } ?: return@doLast
 
-    val shellCmd = if (os.isWindows)
-        listOf(
-            "cmd.exe",
-            "/c",
-        )
-    else
-        listOf(
-            "bash",
-            "-c",
-        )
+        outputDir.mkdirs()
+        var count = 0
 
-    val iconPack = listOf(
-        cliPath.absolutePath,
-        "iconpack",
-        "--output-path=" + outputDir.absolutePath,
-        "--package-name=" + pkgName,
-        "--iconpack=" + "Icons.Filled,Icons.AutoMirrored",
-    )
+        val iconObjFile = File(outputDir, "Icons.kt")
+        val iconObjText = """
+            package $pkgName
 
-    val mainIcons = listOf(
-        cliPath.absolutePath,
-        "svgxml2imagevector",
-        "--input-path=" + inputDir.absolutePath,
-        "--output-path=" + outputDir.absolutePath,
-        "--package-name=" + pkgName,
-        "--iconpack-name=" + "Icons",
-    )
+            object Icons
+        """.trimIndent()
+        iconObjFile.writeText(iconObjText)
 
-    val filledIcons = listOf(
-        cliPath.absolutePath,
-        "svgxml2imagevector",
-        "--input-path=" + File(inputDir, "filled").absolutePath,
-        "--output-path=" + outputDir.absolutePath,
-        "--package-name=" + pkgName,
-        "--iconpack-name=" + "Icons",
-        "--nested-pack-name=" + "Filled",
-    )
+        inputFiles.forEach { inputFile ->
+            val sourceIconName = inputFile.nameWithoutExtension.substringBefore(" ")
+            val autoMirroredMarker = " autoMirrored"
+            val destIconName = inputFile.nameWithoutExtension
+                .split("_", " ")
+                .joinToString("") { it.replaceFirstChar { c -> c.uppercase() } }
 
-    val autoMirroredIcons = listOf(
-        cliPath.absolutePath,
-        "svgxml2imagevector",
-        "--input-path=" + File(inputDir, "automirrored").absolutePath,
-        "--output-path=" + outputDir.absolutePath,
-        "--package-name=" + pkgName,
-        "--iconpack-name=" + "Icons",
-        "--nested-pack-name=" + "AutoMirrored",
-        "--auto-mirror=" + "true",
-    )
+            val text = inputFile.readText()
+                .replaceFirst("package .+".toRegex(), "package $pkgName")
+                .replaceFirst("\"$sourceIconName\"", "\"$destIconName\"")
+                .replace("_$sourceIconName", "_$destIconName")
+                .replaceFirst("PathFillType.Companion.", "PathFillType.")
+                .replace(
+                    """public val\s+(?!Icons\.)([A-Za-z_][A-Za-z0-9_]*)\s*:\s*ImageVector\b""".toRegex(),
+                    "val Icons.$destIconName: ImageVector"
+                )
+                .let {
+                    if (inputFile.nameWithoutExtension.contains(autoMirroredMarker))
+                        it.replace("""ImageVector\.Builder\(([\s\S]*?)\n(\s*)\)(\s*\n\s*\.apply)""".toRegex()) { match ->
+                            val params = match.groupValues[1]
+                            val closingIndent = match.groupValues[2]
+                            val apply = match.groupValues[3]
+                            val paramIndent = "$closingIndent  "
 
-    // run all of them in a single command to avoid multiple exec tasks
-    commandLine(
-        shellCmd + listOf(
-            (iconPack + "&&" + mainIcons + "&&" + filledIcons + "&&" + autoMirroredIcons)
-                .joinToString(" ")
-        )
-    )
+                            "ImageVector.Builder($params\n$paramIndent" + "autoMirror = true,\n$closingIndent)$apply"
+                        }
+                    else
+                        it
+                }
+
+            val outputFile = File(outputDir, "$destIconName.kt")
+            outputFile.writeText(text)
+
+            count++
+        }
+
+        println("Processed $count icons.")
+    }
 }
 
-
-data class CrowdinMember(val username: String)
-data class CrowdinMemberData(val data: CrowdinMember)
-data class CrowdinMembersRoot(val data: List<CrowdinMemberData>)
-
+@Suppress("UNCHECKED_CAST")
 tasks.register("fetchCrowdinMembers") {
-    val projectIdProvider = project.provider { localProperties["crowdin.project"]!! }
-    val tokenProvider = project.provider { localProperties["crowdin.token"]!! }
-    val membersFile = file("src/commonMain/composeResources/files/crowdin_members.txt")
-    outputs.file(membersFile)
+    val projectIdProvider = project.provider { localProperties.getProperty("crowdin.project")!! }
+    val tokenProvider = project.provider { localProperties.getProperty("crowdin.token")!! }
+    val outputFile = file("src/commonMain/composeResources/files/crowdin_members.txt")
+    val debugFile = layout.buildDirectory.file("crowdin/top-members-report.json")
+
+    outputs.files(outputFile, debugFile)
 
     doLast {
         val projectId = projectIdProvider.get()
         val token = tokenProvider.get()
+        val debugFile = debugFile.get().asFile
+        var reportId: String? = null
+//        reportId = "sth"
 
-        val url =
-            URI("https://api.crowdin.com/api/v2/projects/$projectId/members?limit=500&orderBy=username&role=translator").toURL()
-        val conn = url.openConnection() as HttpURLConnection
-        conn.requestMethod = "GET"
-        conn.setRequestProperty("Authorization", "Bearer $token")
-        conn.setRequestProperty("Accept", "application/json")
-        conn.connectTimeout = 3000
+        val client = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(30))
+            .build()
 
-        val responseCode = conn.responseCode
-        if (responseCode == HttpURLConnection.HTTP_OK) {
-            val responseJson = conn.inputStream.bufferedReader().readText()
+        fun apiRequest(method: String, url: String, body: String? = null): String {
+            val builder = HttpRequest.newBuilder()
+                .uri(URI.create(url))
+                .header("Authorization", "Bearer $token")
+                .header("Content-Type", "application/json")
+                .timeout(Duration.ofSeconds(60))
+            builder.method(
+                method,
+                if (body != null)
+                    HttpRequest.BodyPublishers.ofString(body)
+                else
+                    HttpRequest.BodyPublishers.noBody()
+            )
+            val response = client.send(builder.build(), HttpResponse.BodyHandlers.ofString())
+            if (response.statusCode() !in 200..299) {
+                throw GradleException("Crowdin API request failed [$method $url]: HTTP ${response.statusCode()} - ${response.body()}")
+            }
+            return response.body()
+        }
 
-            val gson = Gson()
-            val root = gson.fromJson(responseJson, CrowdinMembersRoot::class.java)
-            val userDataList = root.data
+        @Suppress("UNCHECKED_CAST")
+        fun asMap(json: String): Map<String, Any?> =
+            JsonSlurper().parseText(json) as Map<String, Any?>
 
-            val outputLines = userDataList.joinToString("\n") { it.data.username }
+        // generate a report
+        val reportsBase = "https://api.crowdin.com/api/v2/projects/$projectId/reports"
 
-            membersFile.writeText(outputLines)
-            println("Crowdin members fetched successfully.")
+        if (reportId == null) {
+
+            val genBody = """
+            {
+              "name": "top-members",
+              "schema": {
+                "unit": "strings",
+                "format": "json",
+                "dateFrom": "2018-01-01T00:00:00+00:00",
+                "dateTo": "${OffsetDateTime.now(ZoneOffset.UTC)}"
+              }
+            }
+        """.trimIndent()
+
+            var genData =
+                asMap(apiRequest("POST", reportsBase, genBody))["data"] as Map<String, Any?>
+            reportId = genData["identifier"] as String
+            val statusUrl = "$reportsBase/$reportId"
+
+            // poll until finished
+            var status = genData["status"] as String
+            var attempts = 0
+            while (status != "finished") {
+                if (status == "failed") throw GradleException("Crowdin report generation failed")
+                if (attempts++ > 10) throw GradleException("Timed out waiting for Crowdin report")
+                Thread.sleep(5000)
+                val statusData = asMap(apiRequest("GET", statusUrl))["data"] as Map<String, Any?>
+                status = statusData["status"] as String
+            }
+        }
+
+        // Get the (pre-signed) download URL, then fetch the report content directly — no auth header needed here.
+        val downloadDataUrl = "$reportsBase/$reportId/download"
+        val downloadData =
+            asMap(apiRequest("GET", downloadDataUrl))["data"] as Map<String, Any?>
+        val downloadUrl = downloadData["url"] as String
+
+        val reportResponse = client.send(
+            HttpRequest.newBuilder().uri(URI.create(downloadUrl)).GET().build(),
+            HttpResponse.BodyHandlers.ofString()
+        )
+        if (reportResponse.statusCode() != 200) {
+            throw GradleException("Failed to download Crowdin report: HTTP ${reportResponse.statusCode()}")
+        }
+        debugFile.parentFile.mkdirs()
+        debugFile.writeText(reportResponse.body())
+
+        // parse the report
+        val report = JsonSlurper().parseText(reportResponse.body()) as Map<String, Any?>
+        val entries = report["data"] as List<Map<String, Any?>>
+
+        val translators = entries
+            .filter { ((it["translated"] as? Number)?.toLong() ?: 0L) > 0 }
+            .mapNotNull { (it["user"] as? Map<*, *>)?.get("username") as? String }
+            .toSortedSet(String.CASE_INSENSITIVE_ORDER)
+
+        outputFile.writeText(translators.joinToString("\n"))
+
+        if (translators.isEmpty()) {
+            println("No translators found, check the JSON")
         } else {
-            throw IOException("Failed to fetch Crowdin members. Response code: $responseCode")
+            println("Got ${translators.size} translators")
         }
     }
 }
 
-data class CrowdinLanguageProps(val twoLettersCode: String)
-data class CrowdinLanguage(
-    val languageId: String,
-    val language: CrowdinLanguageProps,
-    val translationProgress: Int,
-)
-
-data class CrowdinLanguageData(val data: CrowdinLanguage)
-data class CrowdinLanguagesRoot(val data: List<CrowdinLanguageData>)
-
 tasks.register("fetchCrowdinLanguages") {
-    val projectIdProvider = project.provider { localProperties["crowdin.project"]!! }
-    val tokenProvider = project.provider { localProperties["crowdin.token"]!! }
+    val projectIdProvider = project.provider { localProperties.getProperty("crowdin.project")!! }
+    val tokenProvider = project.provider { localProperties.getProperty("crowdin.token")!! }
     val localesConfigFile = file("src/androidMain/res/xml/locales_config.xml")
     val localeUtilsFile = file("src/commonMain/kotlin/com/arn/scrobble/utils/LocaleUtils.kt")
+    val localesTextFile = file("locales.txt")
 
-    outputs.file(localesConfigFile)
-    outputs.file(localeUtilsFile)
+    outputs.files(localesConfigFile, localeUtilsFile, localesTextFile)
 
     doLast {
         val projectId = projectIdProvider.get()
@@ -843,60 +512,89 @@ tasks.register("fetchCrowdinLanguages") {
             "pt-BR" to "pt-BR",
         )
 
-        val url =
-            URI("https://api.crowdin.com/api/v2/projects/$projectId/languages/progress?limit=500").toURL()
-        val conn = url.openConnection() as HttpURLConnection
-        conn.requestMethod = "GET"
-        conn.setRequestProperty("Authorization", "Bearer $token")
-        conn.setRequestProperty("Accept", "application/json")
-        conn.connectTimeout = 3000
+        val client = HttpClient.newBuilder()
+            .connectTimeout(Duration.ofSeconds(30))
+            .build()
 
-        val responseCode = conn.responseCode
-        if (responseCode == HttpURLConnection.HTTP_OK) {
-            val responseJson = conn.inputStream.bufferedReader().readText()
+        val request = HttpRequest.newBuilder()
+            .uri(URI.create("https://api.crowdin.com/api/v2/projects/$projectId/languages/progress?limit=500"))
+            .header("Authorization", "Bearer $token")
+            .header("Accept", "application/json")
+            .timeout(Duration.ofSeconds(30))
+            .GET()
+            .build()
 
-            val gson = Gson()
-            val root = gson.fromJson(responseJson, CrowdinLanguagesRoot::class.java)
-            val userDataList = root.data
+        val response = client.send(request, HttpResponse.BodyHandlers.ofString())
 
-            val languagesFiltered = (
-                    userDataList.filter {
-                        it.data.translationProgress >= minProgress
-                    }.map {
-                        customMappings[it.data.languageId] ?: it.data.language.twoLettersCode
+        if (response.statusCode() != 200) {
+            throw IOException("Failed to fetch Crowdin languages. Response code: ${response.statusCode()}")
+        }
+
+        @Suppress("UNCHECKED_CAST")
+        val root = JsonSlurper().parseText(response.body()) as Map<String, Any?>
+
+        @Suppress("UNCHECKED_CAST")
+        val entries = root["data"] as List<Map<String, Any?>>
+
+        val languagesFiltered = (
+                entries.mapNotNull { it["data"] as? Map<*, *> }
+                    .filter {
+                        ((it["translationProgress"] as? Number)?.toInt() ?: 0) >= minProgress
+                    }
+                    .map { data ->
+                        val languageId = data["languageId"] as String
+                        val twoLettersCode =
+                            (data["language"] as Map<*, *>)["twoLettersCode"] as String
+                        customMappings[languageId] ?: twoLettersCode
                     } + "en"
-                    ).sorted()
+                ).sorted()
 
-            // write to locale_config.xml
-            val localesConfigText =
-                """<?xml version='1.0' encoding='UTF-8'?>
+        val localesWithNames = languagesFiltered.map {
+            val localeObj = Locale.forLanguageTag(it)
+            val displayLanguage = localeObj.getDisplayLanguage(localeObj)
+
+            val suffix = when (localeObj.language) {
+                "zh" -> " " + localeObj.getDisplayScript(localeObj)
+                "pt" -> localeObj.getDisplayCountry(localeObj)
+                    .ifEmpty { null }
+                    ?.let { " $it" } ?: ""
+
+                else -> ""
+            }
+
+            it to displayLanguage + suffix
+        }.sortedWith { (k1, v1), (k2, v2) ->
+            v1.compareTo(v2, ignoreCase = true)
+        }
+
+        // write to locale_config.xml
+        val localesConfigText =
+            """<?xml version='1.0' encoding='UTF-8'?>
 <locale-config xmlns:android="http://schemas.android.com/apk/res/android">
 ${languagesFiltered.joinToString("\n") { "    <locale android:name=\"$it\" />" }}
 </locale-config>
 """
-            localesConfigFile.writeText(localesConfigText)
+        localesConfigFile.writeText(localesConfigText)
 
-            // write to LocaleUtils.kt
-            val localeUtilsPartialText = """
-    val localesSet = arrayOf(
-${languagesFiltered.joinToString("\n") { "        \"$it\"," }}
+        // write to LocaleUtils.kt
+        val localeUtilsPartialText = """
+    val localesMap = mapOf(
+${localesWithNames.joinToString(",\n") { "        \"${it.first}\" to \"${it.second}\"" }}
     )
 """
 
-            val localeUtilsText = localeUtilsFile.readText()
-            val start =
-                localeUtilsText.indexOf("// localesSet start") + "// localesSet start".length
-            val end = localeUtilsText.indexOf("    // localesSet end")
-            val newLocaleUtilsText =
-                localeUtilsText.take(start) + localeUtilsPartialText + localeUtilsText.substring(
-                    end
-                )
-            localeUtilsFile.writeText(newLocaleUtilsText)
+        val localeUtilsText = localeUtilsFile.readText()
+        val start =
+            localeUtilsText.indexOf("// localesSet start") + "// localesSet start".length
+        val end = localeUtilsText.indexOf("    // localesSet end")
+        val newLocaleUtilsText =
+            localeUtilsText.take(start) + localeUtilsPartialText + localeUtilsText.substring(end)
+        localeUtilsFile.writeText(newLocaleUtilsText)
 
-            println("Crowdin languages fetched successfully.")
-        } else {
-            throw IOException("Failed to fetch Crowdin languages. Response code: $responseCode")
-        }
+        // write to locales.txt
+        localesTextFile.writeText(languagesFiltered.joinToString("\n"))
+
+        println("Got ${languagesFiltered.size} languages")
     }
 }
 
@@ -1018,49 +716,12 @@ tasks.register<Copy>("copyMds") {
 
 tasks.configureEach {
     when (name) {
-        "packageReleaseDmg" -> {
-            if (os.isMacOsX) finalizedBy("copyReleaseDmg")
-        }
-
-        "packageUberJarForCurrentOS" -> {
-            if (os.isLinux) {
-                finalizedBy("packageLinuxAppImageAndTarball")
-            } else if (os.isWindows) {
-                finalizedBy("packageInno")
-            }
-        }
-
-        "buildNativeImage" -> {
-            // Explicitly declare dependency to fix the "implicit dependency" error
-            mustRunAfter("packageUberJarForCurrentOS")
-            dependsOn("packageUberJarForCurrentOS")
-        }
-
-        "packageLinuxAppImageAndTarball" -> {
-            dependsOn("buildNativeImage")
-        }
-
-        "packageInno" -> {
-            dependsOn("buildNativeImage")
-        }
-
-        "copyNonXmlValueResourcesForAndroidMain" -> {
-            // Ensure AboutLibraries export runs first
-            dependsOn(":androidApp:exportLibraryDefinitions")
-            // Optional ordering guard
-            mustRunAfter(":androidApp:exportLibraryDefinitions")
-        }
-
-        "copyNonXmlValueResourcesForDesktopMain" -> {
-            mustRunAfter(":composeApp:exportLibraryDefinitions")
-        }
-
         "copyNonXmlValueResourcesForCommonMain" -> {
-            dependsOn(":composeApp:copyMds")
+            dependsOn("copyMds")
         }
 
         "updateMaterialSymbols" -> {
-            finalizedBy("convertMaterialSymbols")
+            finalizedBy("processMaterialSymbols")
         }
     }
 }

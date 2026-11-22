@@ -1,0 +1,34 @@
+1 VERSIONINFO
+FILEVERSION $versionMajor,$versionMinor,0,0
+PRODUCTVERSION $versionMajor,$versionMinor,0,0
+FILEOS 0x40004
+FILETYPE 0x1
+{
+BLOCK "StringFileInfo"
+{
+	BLOCK "040904b0"
+	{
+		VALUE "CompanyName", "kawaiiDango"
+		VALUE "FileDescription", "Pano Scrobbler"
+		VALUE "FileVersion", "$versionMajor.$versionMinor"
+		VALUE "LegalCopyright", "(c) kawaiiDango"
+		VALUE "OriginalFilename", "$fileName"
+		VALUE "ProductName", "Pano Scrobbler"
+		VALUE "ProductVersion", "$versionMajor.$versionMinor"
+	}
+}
+
+BLOCK "VarFileInfo"
+{
+	VALUE "Translation", 0x0409 0x04B0
+}
+}
+
+1 24 "app.manifest"
+1 ICON "app-icons/windows/pano-scrobbler.ico"
+100 ICON "app-icons/windows/pano-scrobbler-idle-black.ico"
+101 ICON "app-icons/windows/pano-scrobbler-idle-white.ico"
+110 ICON "app-icons/windows/pano-scrobbler-scrobbling-black.ico"
+111 ICON "app-icons/windows/pano-scrobbler-scrobbling-white.ico"
+120 ICON "app-icons/windows/pano-scrobbler-error-black.ico"
+121 ICON "app-icons/windows/pano-scrobbler-error-white.ico"

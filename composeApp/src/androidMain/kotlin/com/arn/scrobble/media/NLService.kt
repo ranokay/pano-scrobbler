@@ -12,6 +12,7 @@ import co.touchlab.kermit.Logger
 import com.arn.scrobble.BuildKonfig
 import com.arn.scrobble.R
 import com.arn.scrobble.api.lastfm.ScrobbleData
+import com.arn.scrobble.discordrpc.DiscordRpc
 import com.arn.scrobble.logger.JavaUtilFileLogger
 import com.arn.scrobble.utils.AndroidStuff
 import com.arn.scrobble.utils.AndroidStuff.toast
@@ -19,12 +20,14 @@ import com.arn.scrobble.utils.MetadataUtils
 import com.arn.scrobble.utils.PanoNotifications
 import com.arn.scrobble.utils.PlatformStuff
 import com.arn.scrobble.utils.Stuff
+import com.arn.scrobble.utils.VariantStuff
 import com.arn.scrobble.utils.applyAndroidLocaleLegacy
 import com.arn.scrobble.utils.getStringInDeviceLocale
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
@@ -74,7 +77,11 @@ class NLService : NotificationListenerService() {
 
                 val scrobblerEnabled = mainPrefs.data.map { it.scrobblerEnabled }.first()
                 if (!scrobblerEnabled) {
-                    requestUnbind()
+                    try {
+                        requestUnbind()
+                    } catch (e: Exception) {
+                        Logger.w(e) { "Failed to unbind service" }
+                    }
                     inited = false
                 }
             }.invokeOnCompletion {
@@ -86,23 +93,28 @@ class NLService : NotificationListenerService() {
 
     private fun init() {
         coroutineScope.launch {
-            PlatformStuff.mainPrefs.data.map { it.logToFileOnAndroid }.collect {
-                Logger.config.logWriterList
-                    .filterIsInstance<JavaUtilFileLogger>()
-                    .firstOrNull()
-                    ?.isEnabled = it
-            }
+            PlatformStuff.mainPrefs.data.map { it.logToFileOnAndroid }
+                .distinctUntilChanged()
+                .collect {
+                    Logger.config.logWriterList
+                        .filterIsInstance<JavaUtilFileLogger>()
+                        .firstOrNull()
+                        ?.isEnabled = it
+                }
         }
 
         coroutineScope.launch {
-            PlatformStuff.mainPrefs.data.map { it.scrobblerEnabled }.collect {
-                if (!it)
-                    requestUnbind()
-            }
+            PlatformStuff.mainPrefs.data.map { it.scrobblerEnabled }
+                .distinctUntilChanged()
+                .collect {
+                    if (!it)
+                        requestUnbind()
+                }
         }
 
         coroutineScope.launch {
             PlatformStuff.mainPrefs.data.map { it.notiPersistent }
+                .distinctUntilChanged()
                 .collect { notiPersistent ->
                     if (notiPersistent) {
                         PanoNotifications.startFgs(this@NLService)
@@ -142,7 +154,7 @@ class NLService : NotificationListenerService() {
             // Media controller needs notification listener service permissions.
         }
 
-//      Don't instantiate BillingRepository in this service, it causes unexplained ANRs
+//      Don't connect to the heavyweight google play billing in this process
 
         if (BuildKonfig.DEBUG && Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             AndroidStuff.getScrobblerExitReasons().let {
@@ -155,6 +167,9 @@ class NLService : NotificationListenerService() {
         coroutineScope.launch {
             listenForPlayingTrackEvents(scrobbleQueue, sessListener!!)
         }
+
+        if (VariantStuff.isNonPlay)
+            DiscordRpc.start()
 
         Logger.i { "init" }
     }
@@ -175,8 +190,7 @@ class NLService : NotificationListenerService() {
     }
 
     override fun onDestroy() {
-        if (AndroidStuff.canShowPersistentNotiIfEnabled)
-            PanoNotifications.stopFgs(this)
+        PanoNotifications.stopFgs(this)
         if (BuildKonfig.DEBUG)
             toast(R.string.scrobbler_off)
 
@@ -329,10 +343,12 @@ class NLService : NotificationListenerService() {
             title = scrobbleData.track,
             album = scrobbleData.album.orEmpty(),
             albumArtist = scrobbleData.albumArtist.orEmpty(),
+            trackNumber = 0,
             durationMillis = scrobbleData.duration ?: 0L,
             normalizedUrlHost = null,
             artUrl = null,
-            extraData = emptyMap()
+            extraTags = emptyMap(),
+            setPlayStartTime = false
         )
 
         val metadataChanged = !needsDelayAndCooldown ||
@@ -341,11 +357,20 @@ class NLService : NotificationListenerService() {
                 trackInfo.hash != trackInfo.lastScrobbleHash
 
         if (metadataChanged) {
+            trackInfo.resetTimePlayed()
             scrobbleQueue.remove(trackInfo.hash)
+
+            if (sessListener?.isAppAllowListed(pkgName) == false) {
+                coroutineScope.launch {
+                    PanoNotifications.notifyAppDetected(
+                        trackInfo.appId,
+                        PlatformStuff.loadApplicationLabel(trackInfo.appId)
+                    )
+                }
+            }
 
             scrobbleQueue.scrobble(
                 trackInfo = trackInfo,
-                appIsAllowListed = sessListener?.isAppAllowListed(pkgName) == true,
                 delay = if (needsDelayAndCooldown) delay else 0L,
                 timestampOverride = if (!needsDelayAndCooldown) scrobbleData.timestamp else null
             )

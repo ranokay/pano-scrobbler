@@ -1,14 +1,19 @@
-<resources>
+<resources xmlns:tools="http://schemas.android.com/tools">
 
     <style name="ParentTheme" parent="android:Theme.DeviceDefault.NoActionBar" />
+
+    <style name="Patch" />
 
     <!-- Base application theme. -->
     <style name="AppTheme" parent="ParentTheme">
         <item name="android:colorPrimary">@color/pinkPrimary</item>
 
         <item name="android:windowContentTransitions">true</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@drawable/avd_splash_icon</item>
-        <item name="android:windowSplashScreenAnimationDuration">@integer/splash_screen_duration
+        <item name="android:windowSplashScreenAnimatedIcon" tools:targetApi="31">
+            @drawable/avd_splash_icon
+        </item>
+        <item name="android:windowSplashScreenAnimationDuration" tools:targetApi="31">
+            @integer/splash_screen_duration
         </item>
         <item name="android:fitsSystemWindows">false</item>
         <item name="android:statusBarColor">@android:color/transparent</item>
@@ -24,31 +29,41 @@
         <!-- bug https://stackoverflow.com/a/48328471/1067596-->
     </style>
 
-    <style name="AppThemeWithWallpaper" parent="ParentTheme">
+    <style name="AppTheme.Wallpaper">
         <item name="android:windowBackground">@android:color/transparent</item>
-        <item name="android:windowContentOverlay">@null</item>
         <item name="android:windowShowWallpaper">true</item>
     </style>
 
+    <style name="Patch.Wallpaper">
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowShowWallpaper">true</item>
+    </style>
 
-    <style name="AppThemeDialog" parent="android:Theme.DeviceDefault.Dialog.Alert">
-        <item name="android:windowSoftInputMode">adjustResize</item>
-        <item name="android:windowActionBar">false</item>
-        <item name="android:windowNoTitle">true</item>
+    <style name="AppTheme.Dialog">
         <item name="android:windowIsTranslucent">true</item>
-        <item name="android:windowMinWidthMajor">60%</item>
-        <item name="android:windowMinWidthMinor">95%</item>
-        <item name="android:windowEnterTransition">@android:transition/fade</item>
-        <item name="android:windowExitTransition">@android:transition/fade</item>
-        <item name="android:windowActivityTransitions">true</item>
-        <item name="android:windowSplashScreenAnimatedIcon">@drawable/avd_splash_icon</item>
+        <item name="android:windowIsFloating">false</item>
 
         <item name="android:windowBackground">@android:color/transparent</item>
         <item name="android:windowContentOverlay">@null</item>
-
-        <!--<item name="android:windowNoTitle">true</item>-->
-        <item name="android:windowIsFloating">true</item>
-        <!--        <item name="android:backgroundDimEnabled">false</item>-->
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowDisablePreview">true</item>
+        <item name="android:windowClipToOutline">false</item>
     </style>
 
+    <!-- Override material3's ModalBottomSheet theme to enable background blur -->
+    <style name="EdgeToEdgeFloatingDialogTheme" parent="android:Theme.DeviceDefault.Dialog" tools:override="true">
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowLayoutInDisplayCutoutMode" tools:targetApi="27">
+            @integer/m3c_window_layout_in_display_cutout_mode
+        </item>
+        <item name="android:windowClipToOutline">false</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowElevation">0dp</item>
+        <item name="android:windowIsTranslucent">true</item>
+    </style>
 </resources>

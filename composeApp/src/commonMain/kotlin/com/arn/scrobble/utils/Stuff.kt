@@ -25,6 +25,7 @@ import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -33,7 +34,6 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.serialization.json.Json
 import java.security.MessageDigest
 import java.text.DecimalFormat
-import java.text.NumberFormat
 import java.util.Calendar
 import java.util.Locale
 import java.util.TimeZone
@@ -62,7 +62,6 @@ object Stuff {
     const val MAX_PATTERNS = 50
     const val MAX_PATTERNS_HIGH = 300
     const val MAX_PINNED_FRIENDS = 10
-    const val MAX_INDEXED_ITEMS = 10000
     const val PINNED_FRIENDS_CACHE_TIME = 60L * 60 * 24 * 1 * 1000
     const val MIN_ITEMS_TO_SHOW_SEARCH = 7
     const val TIME_2002 = 1009823400000L // Jan 1 2002
@@ -77,15 +76,16 @@ object Stuff {
 
     const val EXTRA_PINNED = "pinned"
 
-    const val RECENTS_REFRESH_INTERVAL = 30 * 1000L
-    const val FRIENDS_REFRESH_INTERVAL = 60 * 1000L
+    const val RECENTS_REFRESH_INTERVAL_S = 30
+    const val FRIENDS_REFRESH_INTERVAL_S = 60
     const val LASTFM_MAX_PAST_SCROBBLE = 14 * 24 * 60 * 60 * 1000L
-    const val FULL_INDEX_ALLOWED_INTERVAL = 24 * 60 * 60 * 1000L
     const val CHARTS_WIDGET_REFRESH_INTERVAL_HOURS = 4
     const val META_WAIT = 1000L
     const val MAX_HISTORY_ITEMS = 20
     const val DEFAULT_PAGE_SIZE = 100
     const val SCROBBLE_SOURCE_THRESHOLD = 1000L
+    const val BLUR_BACKDROP_RADIUS_DP = 12
+    const val BLUR_FROSTED_RADIUS_DP = 36
 
     const val LASTFM_API_ROOT = "https://ws.audioscrobbler.com/2.0/"
     const val LIBREFM_API_ROOT = "https://libre.fm/2.0/"
@@ -93,12 +93,15 @@ object Stuff {
     const val LASTFM_URL = "https://www.last.fm/"
 
     const val MANUFACTURER_HUAWEI = "huawei"
+    const val MANUFACTURER_HONOR = "honor"
     const val MANUFACTURER_XIAOMI = "xiaomi"
     const val MANUFACTURER_SAMSUNG = "samsung"
+    const val MANUFACTURER_MOTOROLA = "motorola"
     const val MANUFACTURER_ONEPLUS = "oneplus"
     const val MANUFACTURER_OPPO = "oppo"
-    const val MANUFACTURER_MEIZU = "meizu"
-    const val MANUFACTURER_VIVO = "vivo"
+    const val MANUFACTURER_REALME = "realme"
+    const val MANUFACTURER_TRANSSION = "transsion"
+    const val MANUFACTURER_INFINIX = "infinix"
 
     const val PACKAGE_TV_SETTINGS = "com.android.tv.settings"
     const val ACTIVITY_TV_SETTINGS = "com.android.tv.settings.device.apps.AppsActivity"
@@ -110,6 +113,7 @@ object Stuff {
     const val PACKAGE_PIXEL_NP_AMM = "com.kieronquinn.app.pixelambientmusic"
     const val PACKAGE_SHAZAM = "com.shazam.android"
     const val PACKAGE_AUDILE = "com.mrsep.musicrecognizer"
+    const val PACKAGE_DISCORD = "com.discord"
     const val CHANNEL_SHAZAM = "notification_shazam_match_v1" //"auto_shazam_v2"
     const val CHANNEL_SHAZAM2 = "notification_shazam_foreground_match_v2"
     const val AUDILE_METADATA_KEY_TRACK_TITLE = "com.mrsep.musicrecognizer.track_metadata.title"
@@ -128,6 +132,8 @@ object Stuff {
     const val PACKAGE_PODCAST_ADDICT = "com.bambuna.podcastaddict"
     const val PACKAGE_HUAWEI_MUSIC = "com.android.mediacenter"
     const val PACKAGE_SPOTIFY = "com.spotify.music"
+    const val PACKAGE_SPOTIFY_WIN_EXE = "Spotify.exe"
+    const val PACKAGE_SPOTIFY_WIN_STORE = "SpotifyAB.SpotifyMusic_zpdnekdrzrea0!Spotify"
     const val PACKAGE_DEEZER = "deezer.android.app"
     const val PACKAGE_DEEZER_TV = "deezer.android.tv"
     const val PACKAGE_YOUTUBE_TV = "com.google.android.youtube.tv"
@@ -149,10 +155,17 @@ object Stuff {
     const val PACKAGE_APPLE_MUSIC_CLASSICAL = "com.apple.android.music.classical"
     const val PACKAGE_TIDAL = "com.aspiro.tidal"
     const val PACKAGE_OMNIA = "com.rhmsoft.omnia"
+    const val PACKAGE_BITCHORD = "com.music.bitchord"
+    const val PACKAGE_DIAL = "com.steeben.dial"
+    const val PACKAGE_CHROMECAST_PLAYER = "com.google.android.apps.mediashell"
     const val PACKAGE_APPLE_MUSIC_WIN_EXE = "AppleMusic.exe"
     const val PACKAGE_APPLE_MUSIC_WIN_STORE = "AppleInc.AppleMusicWin_nzyj5cx40ttqa!App"
+    const val PACKAGE_ITUNES_SMTC_WIN_EXE = "iTunes.SMTC.exe"
+    const val PACKAGE_ITUNES_SMTC_WIN_STORE =
+        "49586DaveAntoine.MediaControllerforiTunes_9bzempp7dntjg!App"
     const val HOST_APPLE_MUSIC = "music.apple.com"
     const val HOST_YOUTUBE_MUSIC = "music.youtube.com"
+    const val HOST_YOUTUBE = "youtube.com"
     const val PACKAGE_KDE_CONNECT_LINUX = "org.mpris.MediaPlayer2.kdeconnect"
     const val PACKAGE_FIREFOX_WIN = "308046B0AF4A39CB"
     const val PACKAGE_DEEZER_WIN = "com.deezer.deezer-desktop"
@@ -170,8 +183,6 @@ object Stuff {
     const val ARTIST_NINTENDO_MUSIC = "Nintendo Co., Ltd."
 
     const val CHANNEL_NOTI_SCROBBLING = "noti_scrobbling"
-
-    //    const val CHANNEL_NOTI_SCR_ERR = "noti_scrobble_errors"
     const val CHANNEL_NOTI_NEW_APP = "noti_new_app"
     const val CHANNEL_NOTI_DIGEST_WEEKLY = "noti_digest_weekly"
     const val CHANNEL_NOTI_DIGEST_MONTHLY = "noti_digest_monthly"
@@ -230,6 +241,7 @@ object Stuff {
         PACKAGE_PIXEL_NP,
         PACKAGE_PIXEL_NP_R,
         PACKAGE_PIXEL_NP_AMM,
+//        "com.arn.notification.test",
     )
 
     val disallowedWebviewUrls = listOf(
@@ -239,9 +251,8 @@ object Stuff {
         "https://libre.fm/reset.php",
     )
 
-    val mprisUrlSubdomains = setOf(
-        HOST_APPLE_MUSIC,
-        HOST_YOUTUBE_MUSIC,
+    val lastfmSupportedLanguageOverrides = setOf(
+        "de", "es", "fr", "it", "pl", "pt", "sv", "tr", "ru", "zh", "ja"
     )
 
     var isRunningInTest = false
@@ -277,21 +288,17 @@ object Stuff {
         Base64.withPadding(PaddingOption.ABSENT)
     }
 
-    private val numberFormat by lazy {
-        NumberFormat.getInstance()
-    }
-
     private var mainPrefsCachedValue = MainPrefs()
 
     val globalExceptionFlow by lazy { MutableSharedFlow<Throwable>(extraBufferCapacity = 1) }
 
-    val globalSnackbarFlow by lazy { MutableSharedFlow<PanoSnackbarVisuals>(extraBufferCapacity = 1) }
+    val globalSnackbarFlow by lazy { MutableSharedFlow<PanoSnackbarVisuals>() }
 
     val globalUpdateAction by lazy { MutableStateFlow<UpdateAction?>(null) }
 
-    fun Number.format() = numberFormat.format(this)!!
-
-    val receiptFlow get() = PlatformStuff.mainPrefs.data.map { it.receipt to it.receiptSignature }
+    val receiptFlow
+        get() = PlatformStuff.mainPrefs.data.map { it.receipt to it.receiptSignature }
+            .distinctUntilChanged()
 
     suspend fun setReceipt(r: String?, s: String?) {
         PlatformStuff.mainPrefs.updateData { it.copy(receipt = r, receiptSignature = s) }
@@ -393,8 +400,6 @@ object Stuff {
         return flagEmoji.toString()
     }
 
-    fun <T : Any> List<T>.toInverseMap() = mapIndexed { i, it -> it to i }.toMap()
-
     fun Calendar.setMidnight() {
         this[Calendar.HOUR_OF_DAY] = 0
         this[Calendar.MINUTE] = 0
@@ -409,6 +414,24 @@ object Stuff {
         } catch (e: URLParserException) {
             false
         }
+    }
+
+    fun localizeLastfmUrl(url: String, lang: String? = Locale.getDefault().language): String {
+        val httpsUrl = when {
+            url.startsWith("http://www.last.fm/") -> url.replaceFirst("http://", "https://")
+            url.startsWith("http://last.fm/") -> url.replaceFirst("http://", "https://")
+            else -> url
+        }
+
+        val prefix = listOf("https://www.last.fm/", "https://last.fm/")
+            .firstOrNull { httpsUrl.startsWith(it) } ?: return url
+
+        if (lang !in lastfmSupportedLanguageOverrides) return httpsUrl
+
+        val rest = httpsUrl.removePrefix(prefix)
+        if (rest.substringBefore('/') in lastfmSupportedLanguageOverrides) return httpsUrl
+
+        return "$prefix$lang/$rest"
     }
 
     fun HttpRequestBuilder.cacheStrategy(cacheStrategy: CacheStrategy) {

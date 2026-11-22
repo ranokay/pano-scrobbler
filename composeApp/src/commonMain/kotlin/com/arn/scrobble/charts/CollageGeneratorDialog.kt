@@ -6,8 +6,9 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularWavyProgressIndicator
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -43,7 +44,7 @@ import com.arn.scrobble.icons.MusicNote
 import com.arn.scrobble.icons.Person
 import com.arn.scrobble.icons.Share
 import com.arn.scrobble.themes.LocalThemeAttributes
-import com.arn.scrobble.ui.ButtonWithSpinner
+import com.arn.scrobble.ui.ButtonWithDropdown
 import com.arn.scrobble.ui.ErrorText
 import com.arn.scrobble.ui.FilePicker
 import com.arn.scrobble.ui.FilePickerMode
@@ -72,6 +73,7 @@ import pano_scrobbler.composeapp.generated.resources.skip_missing_images
 import pano_scrobbler.composeapp.generated.resources.tracks
 import pano_scrobbler.composeapp.generated.resources.username
 import pano_scrobbler.composeapp.generated.resources.vd_launcher_fg_for_collage
+import kotlin.time.Duration.Companion.seconds
 
 data class IconPaintersForCollage(
     val app: Painter,
@@ -82,7 +84,6 @@ data class IconPaintersForCollage(
     val colors: List<Color>
 )
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun CollageGeneratorDialog(
     collageType: Int,
@@ -114,7 +115,7 @@ fun CollageGeneratorDialog(
         artist = placeholderImageVectorPainter(null, Icons.Mic),
         album = placeholderImageVectorPainter(null, Icons.Album),
         track = placeholderImageVectorPainter(null, Icons.MusicNote),
-        colors = LocalThemeAttributes.current.allSecondaryContainerColors
+        colors = LocalThemeAttributes.current.avatarContainerColors
     )
     val context = LocalPlatformContext.current
     val shareEnabled = !PlatformStuff.isTv && !PlatformStuff.isDesktop
@@ -160,11 +161,11 @@ fun CollageGeneratorDialog(
     fun launchedShowSavedMessage() {
         showSavedMessage = true
         scope.launch {
-            delay(1000)
+            delay(1.seconds)
 
             onAskForReview()
 
-            delay(2000)
+            delay(2.seconds)
             showSavedMessage = false
         }
     }
@@ -206,6 +207,7 @@ fun CollageGeneratorDialog(
                 )
 
                 OutlinedButton(
+                    shapes = ButtonDefaults.shapes(),
                     onClick = {
                         shareTextToCopy?.let { PlatformStuff.copyToClipboard(it) }
                     },
@@ -222,18 +224,18 @@ fun CollageGeneratorDialog(
         ErrorText(errorText)
 
         Row(
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(16.dp),
+            modifier = Modifier.align(Alignment.CenterHorizontally),
         ) {
-            ButtonWithSpinner(
+            ButtonWithDropdown(
                 prefixText = null,
                 selected = collageType,
                 itemToTexts = collageTypes,
                 onItemSelected = { collageType = it },
-                modifier = Modifier.weight(0.4f),
+                modifier = Modifier.widthIn(min = 112.dp)
             )
 
-            ButtonWithSpinner(
+            ButtonWithDropdown(
                 prefixText = stringResource(Res.string.size),
                 selected = collageSize,
                 itemToTexts = collageSizes,
@@ -242,7 +244,7 @@ fun CollageGeneratorDialog(
                         PlatformStuff.mainPrefs.updateData { it.copy(collageSize = value) }
                     }
                 },
-                modifier = Modifier.weight(0.4f),
+                modifier = Modifier.widthIn(min = 112.dp)
             )
         }
 
@@ -291,15 +293,6 @@ fun CollageGeneratorDialog(
             modifier = Modifier.fillMaxWidth(),
         )
 
-//        if (shareEnabled) {
-//            LabeledCheckbox(
-//                text = stringResource(Res.string.text),
-//                checked = collageText,
-//                onCheckedChange = { collageText = it },
-//                modifier = Modifier.fillMaxWidth(),
-//            )
-//        }
-
         Row(
             horizontalArrangement = Arrangement.spacedBy(16.dp, Alignment.End),
             modifier = Modifier
@@ -317,6 +310,7 @@ fun CollageGeneratorDialog(
                         generateCollage()
                         saveCollageClicked = true
                     },
+                    shapes = ButtonDefaults.shapes(),
                     modifier = if (showSavedMessage) Modifier.alpha(0.5f) else Modifier,
                 ) {
                     Icon(
@@ -335,6 +329,7 @@ fun CollageGeneratorDialog(
 
                 if (shareEnabled) {
                     OutlinedButton(
+                        shapes = ButtonDefaults.shapes(),
                         onClick = {
                             generateCollage()
                             shareCollageClicked = true

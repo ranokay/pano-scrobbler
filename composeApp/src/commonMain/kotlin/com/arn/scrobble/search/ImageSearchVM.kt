@@ -17,20 +17,20 @@ import com.arn.scrobble.utils.PlatformFile
 import com.arn.scrobble.utils.PlatformStuff
 import com.arn.scrobble.utils.Stuff
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.flow.debounce
-import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNot
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-class ImageSearchVM : ViewModel() {
-    private val _searchTerm =
-        MutableSharedFlow<Pair<String, Int>>(replay = 1, extraBufferCapacity = 1)
+class ImageSearchVM(
+    private val musicEntry: MusicEntry,
+    private val originalMusicEntry: MusicEntry?
+) : ViewModel() {
+    private val _searchTerm = MutableStateFlow("" to -1)
     private val _searchResults = MutableStateFlow<SpotifySearchResponse?>(null)
     val searchResultsWithImages = _searchResults.map {
         it ?: return@map null
@@ -43,20 +43,22 @@ class ImageSearchVM : ViewModel() {
     }
     private val _searchError = MutableStateFlow<Throwable?>(null)
     val searchError = _searchError.asStateFlow()
-    private val _hasRedirect = MutableStateFlow(false)
+    private val hasRedirect =
+        (musicEntry is Artist && originalMusicEntry is Artist && musicEntry.name != originalMusicEntry.name) ||
+                (musicEntry is Album && originalMusicEntry is Album &&
+                        (musicEntry.name != originalMusicEntry.name ||
+                                musicEntry.artist!!.name != originalMusicEntry.artist!!.name))
+
     private val _existingMappings = MutableStateFlow<List<CustomSpotifyMapping>>(emptyList())
     val existingMappings = _existingMappings.asStateFlow()
-    private var searchType: Int = -1
-    private var musicEntry: MusicEntry? = null
-    private var originalMusicEntry: MusicEntry? = null
+    private val searchType = if (musicEntry is Album) Stuff.TYPE_ALBUMS else Stuff.TYPE_ARTISTS
 
     init {
         viewModelScope.launch {
             val country = PlatformStuff.mainPrefs.data.map { it.spotifyCountryP }.first()
 
             _searchTerm
-                .distinctUntilChanged()
-                .debounce(500)
+                .filterNot { it.first.isBlank() }
                 .collectLatest { (term, searchType) ->
                     val results = when (searchType) {
                         Stuff.TYPE_ALBUMS ->
@@ -64,7 +66,6 @@ class ImageSearchVM : ViewModel() {
                                 term,
                                 SpotifySearchType.album,
                                 market = country,
-                                limit = LIMIT
                             )
 
                         Stuff.TYPE_ARTISTS ->
@@ -72,7 +73,6 @@ class ImageSearchVM : ViewModel() {
                                 term,
                                 SpotifySearchType.artist,
                                 market = country,
-                                limit = LIMIT
                             )
 
                         else -> throw IllegalArgumentException("Invalid search type: $searchType")
@@ -86,32 +86,8 @@ class ImageSearchVM : ViewModel() {
                     }
                 }
         }
-    }
-
-    fun search(term: String) {
-        _searchTerm.tryEmit(term to searchType)
-    }
-
-    fun setMusicEntries(
-        musicEntry: MusicEntry,
-        originalMusicEntry: MusicEntry?,
-    ) {
-        fun hasRedirect(): Boolean {
-            return (musicEntry is Artist && originalMusicEntry is Artist && musicEntry.name != originalMusicEntry.name) ||
-                    (musicEntry is Album && originalMusicEntry is Album &&
-                            (musicEntry.name != originalMusicEntry.name ||
-                                    musicEntry.artist!!.name != originalMusicEntry.artist!!.name))
-
-        }
-
-        this.musicEntry = musicEntry
-        this.originalMusicEntry = originalMusicEntry
-
-        _hasRedirect.value = hasRedirect()
-        searchType = if (musicEntry is Album) Stuff.TYPE_ALBUMS else Stuff.TYPE_ARTISTS
 
         viewModelScope.launch {
-
             val customSpotifyMapping = withContext(Dispatchers.IO) {
                 when (musicEntry) {
                     is Album -> PanoDb.db.getCustomSpotifyMappingsDao()
@@ -124,7 +100,7 @@ class ImageSearchVM : ViewModel() {
                 }
             }
 
-            val customSpotifyMappingOrig = if (_hasRedirect.value)
+            val customSpotifyMappingOrig = if (hasRedirect)
                 withContext(Dispatchers.IO) {
                     when (originalMusicEntry) {
                         is Album -> PanoDb.db.getCustomSpotifyMappingsDao()
@@ -141,6 +117,10 @@ class ImageSearchVM : ViewModel() {
 
             _existingMappings.value = listOfNotNull(customSpotifyMapping, customSpotifyMappingOrig)
         }
+    }
+
+    fun search(term: String) {
+        _searchTerm.value = term to searchType
     }
 
     fun deleteExistingMappings() {
@@ -184,8 +164,6 @@ class ImageSearchVM : ViewModel() {
         spotifyItem: SpotifyMusicItem?,
         fileUri: String?,
     ) {
-        val musicEntry = musicEntry ?: return // has to be initialized
-
         val mappings = mutableListOf<CustomSpotifyMapping>()
         mappings += createCustomMapping(musicEntry, spotifyItem, fileUri)
 
@@ -195,7 +173,7 @@ class ImageSearchVM : ViewModel() {
         }
 
         // create another mapping for the redirected artist/album
-        if (_hasRedirect.value)
+        if (hasRedirect)
             mappings += createCustomMapping(originalMusicEntry!!, spotifyItem, fileUri)
 
         viewModelScope.launch {
@@ -217,9 +195,5 @@ class ImageSearchVM : ViewModel() {
                 Stuff.globalExceptionFlow.emit(e)
             }
         }
-    }
-
-    companion object {
-        private const val LIMIT = 40
     }
 }

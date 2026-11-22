@@ -1,7 +1,6 @@
 package com.arn.scrobble.api
 
 import com.arn.scrobble.api.lastfm.User
-import com.arn.scrobble.api.lastfm.webp300
 import com.arn.scrobble.utils.Stuff
 import kotlinx.serialization.Serializable
 
@@ -22,14 +21,18 @@ data class UserCached(
     inline fun <reified T> key() =
         T::class.qualifiedName + "|" + "$name|" + Scrobblables.current?.userAccount?.type
 
+    override fun toString() =
+        "UserCached(hashcode=${hashCode()}, order=$order, lastUpdated=$lastUpdated)"
+
     companion object {
-        fun User.toUserCached() = UserCached(
+        fun User.toUserCached(order: Int? = null) = UserCached(
             name = name,
             url = url,
             realname = realname ?: "",
             country = country ?: "None", // gnufm
             registeredTime = registered ?: Stuff.TIME_2002, // gnufm
-            largeImage = webp300 ?: ""
+            largeImage = image?.medium ?: "",
+            order = order,
         )
     }
 }
@@ -40,6 +43,8 @@ data class UserAccountSerializable(
     val user: UserCached,
     val authKey: String,
     val apiRoot: String? = null,
+    val tlsTrustAll: Boolean = false,
+    val canScrobble: Boolean = true,
 )
 
 @Serializable
@@ -47,4 +52,5 @@ data class UserAccountTemp(
     val type: AccountType,
     val authKey: String,
     val apiRoot: String? = null,
+    val tlsTrustAll: Boolean = false,
 )

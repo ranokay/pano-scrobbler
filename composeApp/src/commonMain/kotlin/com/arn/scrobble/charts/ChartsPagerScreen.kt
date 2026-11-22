@@ -1,11 +1,9 @@
 package com.arn.scrobble.charts
 
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -38,10 +36,9 @@ fun ChartsPagerScreen(
     tabsList: List<PanoTab>,
     onSetTabIdx: (Int) -> Unit,
     onNavigate: (PanoRoute) -> Unit,
-    onSetTitle: (String) -> Unit,
     modifier: Modifier = Modifier,
     viewModel: ChartsVM = viewModel { ChartsVM(user, false) },
-    chartsPeriodViewModel: ChartsPeriodVM = viewModel { ChartsPeriodVM(user) },
+    chartsPeriodViewModel: ChartsPeriodVM = viewModel { ChartsPeriodVM() },
 ) {
     val artists = viewModel.artists.collectAsLazyPagingItems()
     val albums = viewModel.albums.collectAsLazyPagingItems()
@@ -54,47 +51,6 @@ fun ChartsPagerScreen(
     val selectedPeriod by chartsPeriodViewModel.selectedPeriod.collectAsStateWithLifecycle()
     val isTimePeriodContinuous = selectedPeriod?.lastfmPeriod != null
 
-    val type by remember(tabIdx) {
-        mutableIntStateOf(
-            when (tabIdx) {
-                0 -> Stuff.TYPE_ARTISTS
-                1 -> Stuff.TYPE_ALBUMS
-                2 -> Stuff.TYPE_TRACKS
-                else -> throw IllegalArgumentException("Unknown page $tabIdx")
-            }
-        )
-    }
-
-    val title = when (type) {
-        Stuff.TYPE_ARTISTS -> getMusicEntryQString(
-            Res.string.artists,
-            Res.plurals.num_artists,
-            artistsCount,
-            isTimePeriodContinuous
-        )
-
-        Stuff.TYPE_ALBUMS -> getMusicEntryQString(
-            Res.string.albums,
-            Res.plurals.num_albums,
-            albumsCount,
-            isTimePeriodContinuous
-        )
-
-        Stuff.TYPE_TRACKS -> getMusicEntryQString(
-            Res.string.tracks,
-            Res.plurals.num_tracks,
-            tracksCount,
-            isTimePeriodContinuous
-        )
-
-        else -> throw IllegalArgumentException("Unknown page $tabIdx")
-    }
-
-
-    LaunchedEffect(title) {
-        onSetTitle(title)
-    }
-
     fun setInput(timePeriod: TimePeriod, prevTimePeriod: TimePeriod?, refreshCount: Int) {
         viewModel.setChartsInput(
             ChartsLoaderInput(
@@ -105,33 +61,66 @@ fun ChartsPagerScreen(
         )
     }
 
-    Column(
+    Box(
         modifier = modifier,
     ) {
         TimePeriodSelector(
-            user = user,
+            registeredTime = user.registeredTime,
             viewModel = chartsPeriodViewModel,
+            onNavigate = onNavigate,
             onSelected = ::setInput,
             showRefreshButton = true,
-            modifier = Modifier.fillMaxWidth()
         )
 
         PanoPager(
             selectedPage = tabIdx,
             onSelectPage = onSetTabIdx,
-            totalPages = tabsList.count(),
-            modifier = Modifier.fillMaxWidth(),
+            totalPages = tabsList.size,
+            modifier = Modifier.fillMaxSize(),
         ) { page ->
+            val type = when (page) {
+                0 -> Stuff.TYPE_ARTISTS
+                1 -> Stuff.TYPE_ALBUMS
+                2 -> Stuff.TYPE_TRACKS
+                else -> throw IllegalArgumentException("Unknown page $tabIdx")
+            }
+
+            val title = when (type) {
+                Stuff.TYPE_ARTISTS -> getMusicEntryQString(
+                    Res.string.artists,
+                    Res.plurals.num_artists,
+                    artistsCount,
+                    isTimePeriodContinuous
+                )
+
+                Stuff.TYPE_ALBUMS -> getMusicEntryQString(
+                    Res.string.albums,
+                    Res.plurals.num_albums,
+                    albumsCount,
+                    isTimePeriodContinuous
+                )
+
+                Stuff.TYPE_TRACKS -> getMusicEntryQString(
+                    Res.string.tracks,
+                    Res.plurals.num_tracks,
+                    tracksCount,
+                    isTimePeriodContinuous
+                )
+
+                else -> throw IllegalArgumentException("Unknown type $type")
+            }
+
             EntriesGridOrList(
-                entries = when (page) {
-                    0 -> artists
-                    1 -> albums
-                    2 -> tracks
-                    else -> throw IllegalArgumentException("Unknown page $page")
+                entries = when (type) {
+                    Stuff.TYPE_ARTISTS -> artists
+                    Stuff.TYPE_ALBUMS -> albums
+                    Stuff.TYPE_TRACKS -> tracks
+                    else -> throw IllegalArgumentException("Unknown type $type")
                 },
                 fetchAlbumImageIfMissing = !isTimePeriodContinuous || type == Stuff.TYPE_TRACKS,
                 showArtists = true,
                 emptyStringRes = Res.string.charts_no_data,
+                titleText = title,
                 placeholderItem = remember(type) {
                     getMusicEntryPlaceholderItem(type)
                 },

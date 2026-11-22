@@ -3,11 +3,18 @@ package com.arn.scrobble.media
 
 import co.touchlab.kermit.Logger
 import com.arn.scrobble.BuildKonfig
+import com.arn.scrobble.discordrpc.DiscordRpc
 import com.arn.scrobble.utils.PanoNotifications
 import com.arn.scrobble.utils.PlatformStuff
 import com.arn.scrobble.utils.Stuff.stateInWithCache
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.launch
+import kotlin.math.abs
 import kotlin.math.min
+import kotlin.time.Duration.Companion.seconds
 
 abstract class MediaListener(
     protected val scope: CoroutineScope,
@@ -24,7 +31,11 @@ abstract class MediaListener(
     protected val allowedPackages = mainPrefs.data.stateInWithCache(scope) { it.allowedPackages }
 
     protected val scrobblerEnabled =
-        mainPrefs.data.stateInWithCache(scope) { it.scrobblerEnabled && it.scrobbleAccounts.isNotEmpty() }
+        mainPrefs.data.stateInWithCache(scope) { it.scrobblerEnabled && it.scrobbleAccounts.count { it.canScrobble } > 0 }
+    protected val scrobbleSpotifyRemote =
+        mainPrefs.data.stateInWithCache(scope) { it.scrobbleSpotifyRemote }
+
+    private var scrobblerPausedTill = -1L
 
     protected abstract val notifyTimelineUpdates: Boolean
 
@@ -40,6 +51,93 @@ abstract class MediaListener(
     protected val sessionTrackers = mutableMapOf<MediaTrackerKey, SessionTracker>()
     private val cachedInfos = mutableMapOf<String, PlayingTrackInfo>()
     protected var mutedHash: Int? = null
+
+    private var scrobbleLockKey: MediaTrackerKey? = null
+
+    init {
+        scope.launch {
+            mainPrefs.data.map { it.scrobblerPausedTill }
+                .distinctUntilChanged()
+                .collect {
+                    pauseAllSessionsTill(it)
+                }
+        }
+    }
+
+    private fun PlayingTrackInfo.isEligibleForScrobble() = isPlaying &&
+            title.isNotEmpty() &&
+            artist.isNotEmpty() &&
+            scrobbledState < PlayingTrackInfo.ScrobbledState.CANCELLED
+
+    // Called right before a session wants to actually submit a scrobble.
+    @Synchronized
+    private fun claimScrobbleLock(
+        requesterKey: MediaTrackerKey,
+        onWon: () -> Unit,
+        onLost: (winnerTrackInfo: PlayingTrackInfo) -> Unit,
+    ) {
+        val holderKey = scrobbleLockKey
+
+        if (holderKey == null || holderKey == requesterKey) {
+            scrobbleLockKey = requesterKey
+            onWon()
+            return
+        }
+
+        val holder = sessionTrackers[holderKey]
+
+        if (holder == null || !holder.trackInfo.isEligibleForScrobble()) {
+            // stale holder, take over outright
+            scrobbleLockKey = requesterKey
+            onWon()
+            return
+        }
+
+        // genuine contention - give it SCROBBLE_LOCK_GRACE_S to resolve itself
+        scope.launch {
+            delay(SCROBBLE_LOCK_GRACE_S.seconds)
+
+            synchronized(this@MediaListener) {
+                if (scrobbleLockKey != holderKey)
+                    return@synchronized // already resolved some other way in the meantime
+
+                val holderTrackInfo = sessionTrackers[holderKey]?.trackInfo
+                val requesterTrackInfo = sessionTrackers[requesterKey]?.trackInfo
+
+                val holderStillPlaying = holderTrackInfo?.isEligibleForScrobble() ?: false
+
+                if (holderStillPlaying) {
+                    val holderAppId = holderTrackInfo.appId
+                    val requesterAppId = requesterTrackInfo?.appId
+
+                    Logger.i { "duplicate detected, requester=$requesterAppId holder=$holderAppId" }
+                    Logger.d { "requesterTrackInfo:$requesterTrackInfo\nholderTrackInfo:$holderTrackInfo" }
+
+                    onLost(holderTrackInfo)
+                } else {
+                    scrobbleLockKey = requesterKey
+                    onWon()
+                }
+            }
+        }
+    }
+
+    @Synchronized
+    private fun releaseScrobbleLockIfHeldBy(key: MediaTrackerKey) {
+        if (scrobbleLockKey == key) {
+            scrobbleLockKey = null
+            promoteNextEligibleTracker()
+        }
+    }
+
+    private fun promoteNextEligibleTracker() {
+        sessionTrackers.values
+            .filter {
+                it.trackInfo.isEligibleForScrobble() && !scrobbleQueue.has(it.trackInfo.hash)
+            }
+            .minByOrNull { it.trackInfo.sessionStartTime }
+            ?.scrobble()
+    }
 
     abstract fun isMediaPlaying(): Boolean
 
@@ -74,21 +172,33 @@ abstract class MediaListener(
             val (sessionKey, sessionTracker) = it.next()
             if (sessionKey !in keysToKeep) {
                 sessionTracker.stop()
+                releaseScrobbleLockIfHeldBy(sessionKey)
                 it.remove()
             }
         }
     }
 
+    private fun pauseAllSessionsTill(time: Long) {
+        scrobblerPausedTill = time
+
+        if (time > System.currentTimeMillis())
+            sessionTrackers.values.forEach { it.pause() }
+    }
+
     abstract fun shouldScrobble(rawAppId: String): Boolean
 
     abstract inner class SessionTracker(
+        private val key: MediaTrackerKey,
         val trackInfo: PlayingTrackInfo,
     ) {
 
         private var lastPlaybackState: CommonPlaybackState? = null
         var isMuted = false
+        var lastDuration = trackInfo.durationMillis
+            private set
+//        private var lastPosition = 0L
 
-        private fun scrobble() {
+        fun scrobble() {
             Logger.d { "playing: timePlayed=${trackInfo.timePlayed} title=${trackInfo.title} hash=${trackInfo.hash.toHexString()}" }
 
             scrobbleQueue.remove(trackInfo.lastScrobbleHash)
@@ -97,26 +207,35 @@ abstract class MediaListener(
             // if self was muted, clear the muted hash too
             unmute(clearMutedHash = isMuted)
 
-            // calc delay
-            val delayMillis = scrobbleTimingPrefs.value.delaySecs * 1000L
-            val delayFraction = scrobbleTimingPrefs.value.delayPercent / 100.0
-            val delayMillisFraction = if (trackInfo.durationMillis > 0)
-                (trackInfo.durationMillis * delayFraction).toLong()
-            else // Assume 2 min track if duration is unknown. This happens mostly with radio apps
-                (120_000 * delayFraction).toLong()
-
             // don't scrobble < n seconds
             // -subtract some to round off. Sometimes 30 second tracks are reported as 29988ms
-            var finalDelay = min(delayMillisFraction, delayMillis)
-                .coerceAtLeast(scrobbleTimingPrefs.value.minDurationSecs * 1000L - 600L)
+            var finalDelay = if (trackInfo.durationMillis > 0) {
+                min(
+                    trackInfo.durationMillis * scrobbleTimingPrefs.value.delayPercent / 100,
+                    scrobbleTimingPrefs.value.delaySecs.seconds.inWholeMilliseconds
+                ).coerceAtLeast(scrobbleTimingPrefs.value.minDurationSecs * 1000L - 600L)
+            } else {
+                30.seconds.inWholeMilliseconds
+            }
 
             finalDelay = (finalDelay - trackInfo.timePlayed)
                 .coerceAtLeast(2000)// deal with negative or 0 delay
 
-            scrobbleQueue.scrobble(
-                trackInfo = trackInfo,
-                appIsAllowListed = trackInfo.appId in allowedPackages.value,
-                delay = finalDelay,
+            claimScrobbleLock(
+                requesterKey = key,
+                onWon = {
+                    onBeforeScrobble()
+
+                    scrobbleQueue.scrobble(
+                        trackInfo = trackInfo,
+                        delay = finalDelay,
+                    )
+                },
+                onLost = { winnerTrackInfo ->
+                    scrobbleQueue.remove(trackInfo.hash)
+                    if (winnerTrackInfo.notiKey != trackInfo.notiKey)
+                        PanoNotifications.removeNotificationByKey(trackInfo.notiKey)
+                },
             )
         }
 
@@ -130,24 +249,43 @@ abstract class MediaListener(
                         metadata.title == trackInfo.origTitle &&
                         metadata.album == trackInfo.origAlbum &&
                         metadata.albumArtist == trackInfo.origAlbumArtist
-            val onlyDurationUpdated = sameAsOld && metadata.duration != trackInfo.durationMillis
+
+            /* tolerance for duration
+            Elisa does this
+            duration=182877
+            duration=182903
+            duration=182928
+            duration=182954
+            duration=182980
+            duration=183006
+            duration=183031
+            ...
+             */
+
+            val onlyDurationUpdated =
+                sameAsOld && abs(metadata.duration - lastDuration) > 1000L
 
             if (BuildKonfig.DEBUG || (!sameAsOld || onlyDurationUpdated))
                 Logger.i { "$metadata $lastPlaybackState ${hashCode().toHexString()}" }
 
-            if (!sameAsOld || onlyDurationUpdated) {
+            if (!sameAsOld || (onlyDurationUpdated && metadata.duration > 0)) {
                 trackInfo.putOriginals(
                     artist = metadata.artist,
                     title = metadata.title,
                     album = metadata.album,
                     albumArtist = metadata.albumArtist,
+                    trackNumber = metadata.trackNumber,
                     durationMillis = metadata.duration,
                     normalizedUrlHost = metadata.normalizedUrlHost,
-                    artUrl = metadata.artUrl,
+                    artUrl = if (onlyDurationUpdated) trackInfo.artUrlState.url else metadata.artUrl,
+                    extraTags = metadata.extraTags,
                 )
 
                 if (mutedHash != null && trackInfo.hash != mutedHash && lastPlaybackState == CommonPlaybackState.Playing)
                     unmute(clearMutedHash = isMuted)
+
+                if (System.currentTimeMillis() < scrobblerPausedTill)
+                    return
 
                 if (ignoreScrobble || metadata.artist.isEmpty() || metadata.title.isEmpty()) {
                     ignoreScrobble()
@@ -157,25 +295,33 @@ abstract class MediaListener(
                     // for cases:
                     // - meta is sent after play
                     // - "gapless playback", where playback state never changes
-                    trackInfo.resetTimePlayed()
                     scrobble()
                 }
             }
+
+            checkRatingChanged(sameAsOld)
+
+            lastDuration = metadata.duration
         }
 
-        private fun ignoreScrobble() {
+        fun ignoreScrobble() {
             // scrobbling may have already started from onMetadataChanged
             scrobbleQueue.remove(trackInfo.lastScrobbleHash)
             PanoNotifications.removeNotificationByKey(trackInfo.notiKey)
             trackInfo.cancelled()
             // do not scrobble again
             lastPlaybackState = CommonPlaybackState.None
+
+            releaseScrobbleLockIfHeldBy(key)
         }
 
         fun playbackStateChanged(
             playbackInfo: PlaybackInfo,
             ignoreScrobble: Boolean,
         ) {
+            if (System.currentTimeMillis() < scrobblerPausedTill)
+                return
+
             if (BuildKonfig.DEBUG || (lastPlaybackState != playbackInfo.state))
                 Logger.i { "$playbackInfo lastPlaybackState: $lastPlaybackState ${hashCode().toHexString()}" }
 
@@ -184,17 +330,21 @@ abstract class MediaListener(
                 return
             }
 
-            val isPossiblyAtStart =
-                playbackInfo.position != -1L && playbackInfo.position < START_POS_LIMIT
+//            val positionDelta = playbackInfo.position - lastPosition
+            val isPossiblyAtStart = trackInfo.durationMillis > 0 &&
+                    playbackInfo.position in 0..START_POS_LIMIT
+//                        (playbackInfo.position < START_POS_LIMIT ||
+//                        trackInfo.durationMillis > 0 && positionDelta < trackInfo.durationMillis * 0.5
+//                        )
 
-            val timelineChanged = trackInfo.setTimelineStartTime(playbackInfo.position) &&
-                    playbackInfo.state == CommonPlaybackState.Playing
+            val timelineChanged = playbackInfo.state == CommonPlaybackState.Playing &&
+                    trackInfo.setTimelineStartTime(playbackInfo.position)
 
             val playbackStateChanged = lastPlaybackState != playbackInfo.state
 
             if (!playbackStateChanged /* bandcamp does this */ &&
                 !(playbackInfo.state == CommonPlaybackState.Playing && isPossiblyAtStart) &&
-                !timelineChanged
+                (!notifyTimelineUpdates || !timelineChanged)
             )
                 return
 
@@ -218,12 +368,12 @@ abstract class MediaListener(
                         trackInfo.resumed()
 
                         if (trackInfo.hash != trackInfo.lastScrobbleHash ||
-                            (playbackInfo.position >= 0L && isPossiblyAtStart && timelineChanged)
+                            (isPossiblyAtStart && (!notifyTimelineUpdates || timelineChanged))
                         )
                             trackInfo.resetTimePlayed()
 
                         if (!scrobbleQueue.has(trackInfo.hash) &&
-                            ((playbackInfo.position >= 0L && isPossiblyAtStart) ||
+                            (isPossiblyAtStart ||
                                     trackInfo.scrobbledState < PlayingTrackInfo.ScrobbledState.SCROBBLE_SUBMITTED &&
                                     // ignore state=playing, pos=lowValue spam
                                     !(!playbackStateChanged &&
@@ -232,6 +382,14 @@ abstract class MediaListener(
                                             )
                                     )
                         ) {
+                            if (isPossiblyAtStart &&
+                                trackInfo.lastScrobbleHash == trackInfo.hash &&
+                                trackInfo.scrobbledState == PlayingTrackInfo.ScrobbledState.SCROBBLE_SUBMITTED
+                            ) {
+                                // normal repeat. Run edits, now playing etc. again
+                                trackInfo.resetMetadata()
+                            }
+
                             scrobble()
                         } else if ((timelineChanged && notifyTimelineUpdates || playbackStateChanged) &&
                             trackInfo.scrobbledState <= PlayingTrackInfo.ScrobbledState.SCROBBLE_SUBMITTED
@@ -242,7 +400,8 @@ abstract class MediaListener(
                     }
                 }
 
-                else -> {
+                CommonPlaybackState.Waiting,
+                CommonPlaybackState.Other -> {
                 }
             }
 
@@ -251,29 +410,43 @@ abstract class MediaListener(
 
         }
 
-        fun pause() {
+        open fun pause() {
             if (lastPlaybackState == CommonPlaybackState.Playing) {
                 if (scrobbleQueue.has(trackInfo.lastScrobbleHash))
                     trackInfo.addTimePlayed()
                 else
                     trackInfo.resetTimePlayed()
-                trackInfo.paused()
             }
+            trackInfo.paused()
 
             scrobbleQueue.remove(trackInfo.lastScrobbleHash)
             PanoNotifications.removeNotificationByKey(trackInfo.notiKey)
             if (isMuted)
                 unmute(clearMutedHash = false)
+
+            releaseScrobbleLockIfHeldBy(key)
+
+            DiscordRpc.paused(trackInfo.hash)
         }
 
-        abstract fun love()
+        open fun stop() {
+            DiscordRpc.paused(trackInfo.hash)
+        }
 
+        protected open fun checkRatingChanged(trackIsSame: Boolean) {}
+
+        abstract fun love()
         abstract fun unlove()
         abstract fun skip()
-        abstract fun stop()
+        abstract fun onBeforeScrobble()
     }
 
     companion object {
         private const val START_POS_LIMIT = 1500L
+
+        // how long a newly-arriving session is given to find out whether the
+        // current lock holder is just lingering through a state-update lag
+        // (transition overlap) vs. genuinely still playing (real concurrency)
+        private const val SCROBBLE_LOCK_GRACE_S = 8
     }
 }

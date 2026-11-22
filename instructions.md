@@ -2,7 +2,8 @@
 
 Welcome to my spaghetti
 
-Put these in local.properties
+Fill these values in local.properties
+
 ```
 # // https://www.last.fm/api/account/create
 lastfm.key=
@@ -12,6 +13,15 @@ spotify.refreshToken=<base64 encoded client_id:client_secret>
 ```
 
 ### For Android (FOSS):
+
+- Optionally, fill these values in local.properties for a signed release build:
+
+```
+releaseGithub.alias=
+releaseGithub.keystorePath=
+releaseGithub.password=
+releaseGithub.storePassword=
+```
 
 - Run `./gradlew androidApp:assembleReleaseGithub`
 
@@ -34,12 +44,21 @@ object Secrets {
 }
 ```
 
-sessionKey can be obtained by logging in to LastFM with a debug build of this app
-and tapping on the "Copy last.fm session key" in the settings screen.
+sessionKey can be obtained by logging in to LastFM with a debug build of this app and tapping on
+"Copy last.fm session key" in the settings screen.
 
 Then run `./gradlew :baselineprofile:generateBaselineProfile`
 
 Currently, the builds skip this step.
+
+- Fill these values in local.properties for a signed release build:
+
+```
+release.alias=
+release.keystorePath=
+release.password=
+release.storePassword=
+```
 
 - Run `./gradlew androidApp:assembleRelease`
 
@@ -51,10 +70,11 @@ Currently, the builds skip this step.
 - Compile the native lib https://github.com/kawaiiDango/pano-native-components
 
 - If you intend to package a build for desktop,
-  use [Bellsoft's GraalVM based on OpenJDK 25](https://bell-sw.com/pages/downloads/native-image-kit/)
+  use [GraalVM CE 25](https://github.com/graalvm/graalvm-ce-builds)
   as your JAVA_HOME and GRAALVM_HOME (both should be set). Also
-  have [Inno Setup](https://jrsoftware.org/isdl.php) installed in Program Files on Windows.
+  have [Inno Setup 7](https://jrsoftware.org/isdl.php) installed on Windows.
 
-- Run `./gradlew composeApp:exportLibraryDefinitions composeApp:packageUberJarForCurrentOS -PaboutLibraries.exportVariant=desktop`
+- Run
+  `./gradlew desktopApp:packageNativeImage`
 
 - **Info**: the desktop build includes no non-free dependencies.

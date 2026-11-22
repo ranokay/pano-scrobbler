@@ -7,18 +7,17 @@ import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.core.view.WindowCompat.enableEdgeToEdge
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.lifecycleScope
-import com.arn.scrobble.pref.SpecificWidgetPrefs
+import com.arn.scrobble.pref.WidgetPrefs
 import com.arn.scrobble.themes.AppTheme
 import com.arn.scrobble.themes.LocalThemeAttributes
 import com.arn.scrobble.utils.AndroidStuff
 import com.arn.scrobble.utils.AndroidStuff.prolongSplashScreen
-import com.arn.scrobble.utils.Stuff
 import com.arn.scrobble.utils.applyAndroidLocaleLegacy
 import kotlinx.coroutines.launch
 
@@ -29,18 +28,17 @@ class ChartsWidgetConfigActivity : ComponentActivity() {
             AppWidgetManager.INVALID_APPWIDGET_ID
         ) ?: AppWidgetManager.INVALID_APPWIDGET_ID
     }
-    private val isPinned by lazy {
-        intent?.extras?.getBoolean(
-            Stuff.EXTRA_PINNED,
-            false
-        ) ?: false
-    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        enableEdgeToEdge()
+        enableEdgeToEdge(window)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             window.isNavigationBarContrastEnforced = false
+        }
+
+        if (appWidgetId == AppWidgetManager.INVALID_APPWIDGET_ID) {
+            finish()
+            return
         }
 
         var initDone = false
@@ -69,8 +67,7 @@ class ChartsWidgetConfigActivity : ComponentActivity() {
                     }
 
                     ChartsWidgetConfigScreen(
-                        isPinned = isPinned,
-                        prefs = prefs.widgets[appWidgetId] ?: SpecificWidgetPrefs(),
+                        prefs = prefs.widgets[appWidgetId] ?: WidgetPrefs.SpecificWidgetPrefs(),
                         onSave = ::savePrefsAndFinish,
                         onCancel = ::cancel
                     )
@@ -79,7 +76,7 @@ class ChartsWidgetConfigActivity : ComponentActivity() {
         }
     }
 
-    private fun savePrefsAndFinish(prefs: SpecificWidgetPrefs, reFetch: Boolean) {
+    private fun savePrefsAndFinish(prefs: WidgetPrefs.SpecificWidgetPrefs, reFetch: Boolean) {
         lifecycleScope.launch {
             var exists = false
 
@@ -93,7 +90,7 @@ class ChartsWidgetConfigActivity : ComponentActivity() {
             if (!exists || reFetch)
                 ChartsWidgetUpdaterWorker.schedule(
                     this@ChartsWidgetConfigActivity.applicationContext,
-                    true
+                    appWidgetId
                 )
             setResult(true)
             finish()

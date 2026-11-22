@@ -2,20 +2,31 @@ package com.arn.scrobble.info
 
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.ScrollState
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.defaultMinSize
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilledTonalToggleButton
 import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.IconButtonDefaults
+import androidx.compose.material3.LocalAbsoluteTonalElevation
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.ToggleButtonSize
+import androidx.compose.material3.contentColorFor
+import androidx.compose.material3.surfaceColorAtElevation
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -26,15 +37,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.boundsInParent
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
-import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.arn.scrobble.icons.Album
+import com.arn.scrobble.icons.ArrowDropDown
 import com.arn.scrobble.icons.Favorite
 import com.arn.scrobble.icons.Icons
 import com.arn.scrobble.icons.KeyboardArrowDown
@@ -45,15 +61,21 @@ import com.arn.scrobble.panoicons.AlbumArtist
 import com.arn.scrobble.panoicons.PanoIcons
 import com.arn.scrobble.ui.AvatarOrInitials
 import com.arn.scrobble.ui.MinimalHtmlParser
+import com.arn.scrobble.ui.PanoDropdownMenu
 import com.arn.scrobble.ui.backgroundForShimmer
+import com.arn.scrobble.ui.rememberClippedPainter
+import com.arn.scrobble.ui.shapedClickable
 import com.arn.scrobble.ui.shimmerWindowBounds
+import com.arn.scrobble.utils.LocaleUtils
+import com.arn.scrobble.utils.LocaleUtils.format
 import com.arn.scrobble.utils.PlatformStuff
 import com.arn.scrobble.utils.Stuff
-import com.arn.scrobble.utils.Stuff.format
+import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.stringResource
 import pano_scrobbler.composeapp.generated.resources.Res
 import pano_scrobbler.composeapp.generated.resources.collapse
-import pano_scrobbler.composeapp.generated.resources.show_all
+import pano_scrobbler.composeapp.generated.resources.expand
+import pano_scrobbler.composeapp.generated.resources.no_wiki
 
 @Composable
 fun InfoWikiText(
@@ -61,119 +83,168 @@ fun InfoWikiText(
     maxLinesWhenCollapsed: Int,
     expanded: Boolean,
     onExpandToggle: () -> Unit,
+    wikiLangs: Set<String>,
+    selectedLang: String,
+    onSelectedLang: (String) -> Unit,
     scrollState: ScrollState, // from vertically scrollable column
     modifier: Modifier = Modifier,
 ) {
-    val coroutineScope = rememberCoroutineScope()
+    val scope = rememberCoroutineScope()
     var overflows by remember { mutableStateOf(false) }
     val density = LocalDensity.current
     val scrollStepPx = with(density) { 96.dp.toPx() }
     var minYInColumn by remember { mutableFloatStateOf(0f) }
     var maxYInColumn by remember { mutableFloatStateOf(0f) }
 
+    val containerColor =
+        MaterialTheme.colorScheme.surfaceColorAtElevation(LocalAbsoluteTonalElevation.current + 1.dp)
+
+    val noWikiText = stringResource(Res.string.no_wiki)
 
     val displayText by remember(text) {
-        mutableStateOf(
-            text
-                .replaceFirst(
-                    """<a href="https?://[^"]+">Read more on Last\.fm</a>""".toRegex(),
-                    "\n\n$0"
-                )
+        val t = if (text.isBlank() && wikiLangs.size > 1) {
+            noWikiText
+        } else text.replaceFirst(
+            """<a href="https?://[^"]+">Read more on Last\.fm</a>""".toRegex(),
+            "\n\n$0"
         )
+
+        mutableStateOf(t)
     }
 
     if (displayText.isNotBlank()) {
-        Box(
-            modifier = modifier
-                .border(
-                    width = 1.dp,
-                    color = MaterialTheme.colorScheme.outline,
-                    shape = MaterialTheme.shapes.medium
-                )
-                .padding(4.dp)
-                .animateContentSize()
-                .onGloballyPositioned { coordinates ->
-                    val bounds = coordinates.boundsInParent()
-
-                    minYInColumn = bounds.top
-                    maxYInColumn = bounds.bottom
-                },
-        ) {
-            Text(
-                text = MinimalHtmlParser.parseLinksToAnnotatedString(
-                    text = displayText,
-                    onLinkClick = if (PlatformStuff.isTv || !expanded)
-                        null
-                    else {
-                        { url -> PlatformStuff.openInBrowser(url) }
-                    }
-                ),
-                style = MaterialTheme.typography.bodyMedium,
-                maxLines = if (expanded) Int.MAX_VALUE else maxLinesWhenCollapsed,
-                overflow = TextOverflow.Ellipsis,
-                onTextLayout = {
-                    if (!expanded) {
-                        overflows = it.hasVisualOverflow
-                    }
-                },
+        Box(modifier = modifier) {
+            Box(
                 modifier = Modifier
-                    .fillMaxWidth()
+                    .padding(top = 16.dp, bottom = 8.dp)
+                    .background(
+                        color = containerColor,
+                        shape = MaterialTheme.shapes.medium
+                    )
+                    .animateContentSize()
+                    .onGloballyPositioned { coordinates ->
+                        val bounds = coordinates.boundsInParent()
+
+                        minYInColumn = bounds.top
+                        maxYInColumn = bounds.bottom
+                    }
                     .then(
                         if (overflows)
-                            Modifier.clip(MaterialTheme.shapes.medium)
-                                .clickable(onClick = onExpandToggle)
-                                .padding(end = 24.dp)
-                        /* is bugged on tv
-                        .onPreviewKeyEvent { keyEvent ->
-                            if (!expanded || keyEvent.type != KeyEventType.KeyDown)
-                                return@onPreviewKeyEvent false
+                            Modifier.shapedClickable(
+                                onClick = onExpandToggle,
+                                clickableAdded = !expanded || PlatformStuff.isTv
+                            )
+                                .onKeyEvent { event ->
+                                    if (event.type != KeyEventType.KeyDown) return@onKeyEvent false
+                                    val canScrollUp = scrollState.value > minYInColumn
+                                    val canScrollDown =
+                                        scrollState.value + scrollState.viewportSize < maxYInColumn
 
-                            val canScrollUp = scrollState.value > minYInColumn
-                            val canScrollDown =
-                                scrollState.value + scrollState.viewportSize < maxYInColumn
-
-                            when (keyEvent.key) {
-                                Key.DirectionDown -> {
-                                    if (canScrollDown) {
-                                        coroutineScope.launch {
-                                            scrollState.animateScrollBy(scrollStepPx)
+                                    when (event.key) {
+                                        Key.DirectionDown -> {
+                                            if (canScrollDown) {
+                                                scope.launch {
+                                                    scrollState.animateScrollBy(scrollStepPx)
+                                                }
+                                                true
+                                            } else false
                                         }
-                                        true
-                                    } else {
-                                        false
+
+                                        Key.DirectionUp -> {
+                                            if (canScrollUp) {
+                                                scope.launch { scrollState.animateScrollBy(-scrollStepPx) }
+                                                true
+                                            } else false
+                                        }
+
+                                        else -> false
                                     }
                                 }
-
-                                Key.DirectionUp -> {
-                                    if (canScrollUp) {
-                                        coroutineScope.launch {
-                                            scrollState.animateScrollBy(-scrollStepPx)
-                                        }
-                                        true
-                                    } else {
-                                        false
-                                    }
-                                }
-
-                                else -> false
-                            }
-                        }
-                         */
                         else Modifier
                     )
-                    .padding(8.dp)
-            )
+                    .padding(4.dp),
+            ) {
+                val bodyMedium = MaterialTheme.typography.bodyMedium
+                val bodyLarge = MaterialTheme.typography.bodyLarge
+                // average the two
+                val textStyle = bodyMedium.copy(
+                    fontSize = ((bodyMedium.fontSize.value + bodyLarge.fontSize.value) / 2).sp,
+                    lineHeight = ((bodyMedium.lineHeight.value + bodyLarge.lineHeight.value) / 2).sp,
+                    letterSpacing = ((bodyMedium.letterSpacing.value + bodyLarge.letterSpacing.value) / 2).sp
+                )
 
-            if (overflows) {
-                Icon(
-                    imageVector = if (expanded) Icons.KeyboardArrowUp else Icons.KeyboardArrowDown,
-                    contentDescription = stringResource(
-                        if (expanded)
-                            Res.string.collapse
-                        else
-                            Res.string.show_all
+                Text(
+                    text = MinimalHtmlParser.parseLinksToAnnotatedString(
+                        text = displayText,
+                        onLinkClick = if (PlatformStuff.isTv || overflows && !expanded)
+                            null
+                        else {
+                            { url ->
+                                PlatformStuff.openInBrowser(
+                                    Stuff.localizeLastfmUrl(url, lang = selectedLang)
+                                )
+                            }
+                        }
                     ),
-                    modifier = Modifier.align(Alignment.CenterEnd)
+                    color = MaterialTheme.colorScheme.contentColorFor(containerColor),
+                    style = textStyle,
+                    maxLines = if (expanded) Int.MAX_VALUE else maxLinesWhenCollapsed,
+                    overflow = TextOverflow.Ellipsis,
+                    onTextLayout = {
+                        if (!expanded) {
+                            overflows = it.hasVisualOverflow
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(
+                            bottom = if (expanded)
+                                IconButtonDefaults.smallContainerSize().height
+                            else if (overflows)
+                                12.dp
+                            else
+                                0.dp
+                        )
+                        .padding(8.dp)
+                )
+
+                if (overflows) {
+                    if (expanded && !PlatformStuff.isTv) {
+                        IconButton(
+                            onClick = { onExpandToggle() },
+                            shapes = IconButtonDefaults.shapes(),
+                            modifier = Modifier
+                                .size(IconButtonDefaults.smallContainerSize(IconButtonDefaults.IconButtonWidthOption.Wide))
+                                .align(Alignment.BottomCenter)
+                        ) {
+                            Icon(
+                                imageVector = Icons.KeyboardArrowUp,
+                                tint = MaterialTheme.colorScheme.primary,
+                                contentDescription = stringResource(Res.string.collapse),
+                                modifier = Modifier
+                                    .fillMaxSize()
+                            )
+                        }
+                    } else if (!expanded) {
+                        Icon(
+                            imageVector = Icons.KeyboardArrowDown,
+                            tint = MaterialTheme.colorScheme.primary,
+                            contentDescription = stringResource(Res.string.expand),
+                            modifier = Modifier
+                                .align(Alignment.BottomCenter)
+                        )
+                    }
+                }
+            }
+
+            if (wikiLangs.size > 1) {
+                WikiLangSelector(
+                    selected = selectedLang,
+                    items = wikiLangs,
+                    onSelected = onSelectedLang,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(y = (-12).dp)
                 )
             }
         }
@@ -185,73 +256,92 @@ fun InfoCounts(
     countPairs: List<Pair<String, Number?>>,
     avatarUrl: String?,
     avatarName: String?,
-    firstItemIsUsers: Boolean,
     modifier: Modifier = Modifier,
     onClickFirstItem: (() -> Unit)? = null,
     forShimmer: Boolean = false,
 ) {
-
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .then(
-                if (forShimmer)
-                    Modifier.shimmerWindowBounds()
-                else
-                    Modifier
-            ),
+            .shimmerWindowBounds(forShimmer),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically
     ) {
         countPairs.forEachIndexed { index, (text, value) ->
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                modifier = Modifier
-                    .weight(1f)
-                    .then(
-                        if (index == 0 && onClickFirstItem != null && !forShimmer)
-                            Modifier
-                                .clip(MaterialTheme.shapes.medium)
-                                .clickable {
-                                    onClickFirstItem()
-                                }
-                                .border(
-                                    1.dp,
-                                    MaterialTheme.colorScheme.outline,
-                                    MaterialTheme.shapes.medium
-                                )
-                                .padding(8.dp)
-                        else
-                            Modifier
-                    )
+            if (index == 0 && avatarName != null) {
+                if (onClickFirstItem != null) {
+                    OutlinedButton(
+                        onClick = onClickFirstItem,
+                        enabled = !forShimmer,
+                        shapes = ButtonDefaults.shapes(),
+                        modifier = Modifier
+                            .weight(1f)
+                    ) {
+                        Column(
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            modifier = Modifier
+                                .weight(1f)
+                        ) {
+                            Text(
+                                text = value?.format() ?: "",
+                                textAlign = TextAlign.Center,
+                                style = MaterialTheme.typography.titleMedium,
+                                modifier = Modifier.backgroundForShimmer(forShimmer)
+                            )
 
-            ) {
-                Text(
-                    text = value?.format() ?: "",
-                    style = MaterialTheme.typography.titleMedium,
-                    textAlign = TextAlign.Center,
-                    fontWeight = if (index == 0 && onClickFirstItem != null) FontWeight.Bold else null,
-                    modifier = Modifier.backgroundForShimmer(forShimmer)
-                )
-                Box(
-                    contentAlignment = Alignment.Center,
-                ) {
-                    if (index == 0 && firstItemIsUsers && avatarName != null) {
+                            AvatarOrInitials(
+                                avatarUrl = avatarUrl,
+                                avatarName = avatarName,
+                                modifier = Modifier
+                                    .padding(4.dp)
+                                    .size(24.dp)
+                                    .clip(CircleShape),
+                            )
+                        }
+                    }
+                } else {
+                    Column(
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        modifier = Modifier
+                            .weight(1f)
+                    ) {
+                        Text(
+                            text = value?.format() ?: "",
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.titleMedium,
+                            modifier = Modifier.backgroundForShimmer(forShimmer)
+                        )
+
                         AvatarOrInitials(
                             avatarUrl = avatarUrl,
                             avatarName = avatarName,
                             modifier = Modifier
-                                .padding(6.dp)
+                                .padding(4.dp)
                                 .size(24.dp)
                                 .clip(CircleShape),
                         )
-                    } else {
-                        Text(
-                            text = text.takeIf { !forShimmer } ?: "",
-                            style = MaterialTheme.typography.bodyMedium,
-                            textAlign = TextAlign.Center,
-                        )
                     }
+                }
+            } else {
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    modifier = Modifier
+                        .weight(1f)
+                        .fillMaxHeight()
+                ) {
+                    Text(
+                        text = value?.format() ?: "",
+                        style = MaterialTheme.typography.titleMedium,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.backgroundForShimmer(forShimmer)
+                    )
+
+                    Text(
+                        text = text.takeIf { !forShimmer } ?: "",
+                        style = MaterialTheme.typography.bodyMedium,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.backgroundForShimmer(forShimmer)
+                    )
                 }
             }
         }
@@ -259,46 +349,43 @@ fun InfoCounts(
 }
 
 @Composable
-fun InfoSimpleHeader(
-    text: String,
-    icon: ImageVector,
-    onClick: (() -> Unit)?,
-    trailingContent: @Composable (() -> Unit)?,
+private fun WikiLangSelector(
+    selected: String,
+    items: Set<String>,
+    onSelected: (String) -> Unit,
     modifier: Modifier = Modifier,
-    leadingContent: @Composable (() -> Unit)? = null,
 ) {
-    Row(
+    var dropDownShown by remember { mutableStateOf(false) }
+
+    FilledTonalToggleButton(
+        checked = dropDownShown,
+        onCheckedChange = { dropDownShown = it },
+        buttonSize = ToggleButtonSize.ExtraSmall,
         modifier = modifier
-            .fillMaxWidth()
-            .defaultMinSize(minHeight = 48.dp)
-            .clip(MaterialTheme.shapes.medium)
-            .then(
-                if (onClick != null)
-                    Modifier.clickable(onClick = onClick)
-                else
-                    Modifier
-            ),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
-        if (leadingContent != null) {
-            leadingContent()
-        }
-
+        Text(selected)
         Icon(
-            imageVector = icon,
-            contentDescription = null,
-            tint = MaterialTheme.colorScheme.primary,
-        )
-        Text(
-            text = text,
-            style = MaterialTheme.typography.titleMedium,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.weight(1f)
+            rememberClippedPainter(Icons.ArrowDropDown, 16.dp),
+            contentDescription = null
         )
 
-        if (trailingContent != null) {
-            trailingContent()
+        PanoDropdownMenu(
+            expanded = dropDownShown,
+            onDismissRequest = { dropDownShown = false }
+        ) {
+            items.forEach { item ->
+                item(
+                    onClick = {
+                        onSelected(item)
+                        dropDownShown = false
+                    },
+                    enabled = item != selected,
+                    text = {
+                        val displayText = LocaleUtils.langCodesMap[item] ?: item
+                        Text(displayText)
+                    }
+                )
+            }
         }
     }
 }
@@ -311,19 +398,4 @@ fun getMusicEntryIcon(type: Int) = when (type) {
     Stuff.TYPE_ALBUM_ARTISTS -> PanoIcons.AlbumArtist
     Stuff.TYPE_LOVES -> Icons.Favorite
     else -> throw IllegalArgumentException("Unknown type: $type")
-}
-
-@Composable
-private fun InfoCountsPreview() {
-    InfoCounts(
-        countPairs = listOf(
-            "Tracks" to 123,
-            "Albums" to 456,
-            "Artists" to 789
-        ),
-        onClickFirstItem = {},
-        avatarUrl = null,
-        firstItemIsUsers = true,
-        avatarName = "LA"
-    )
 }

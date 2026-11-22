@@ -12,6 +12,7 @@ import com.arn.scrobble.charts.TimePeriod
 import com.arn.scrobble.utils.Stuff
 import io.ktor.client.request.forms.FormDataContent
 import io.ktor.client.request.setBody
+import io.ktor.client.request.url
 
 class GnuFm(userAccount: UserAccountSerializable) : LastFm(userAccount) {
     override val apiKey: String = Stuff.LIBREFM_KEY
@@ -30,6 +31,7 @@ class GnuFm(userAccount: UserAccountSerializable) : LastFm(userAccount) {
         )
 
         val result = client.postResult<GnuFmResult> {
+            url(apiRoot)
             setBody(FormDataContent(toFormParametersWithSig(params, apiSecret)))
         }
 
@@ -84,13 +86,13 @@ class GnuFm(userAccount: UserAccountSerializable) : LastFm(userAccount) {
             val apiKey = Stuff.LIBREFM_KEY
             val apiSecret = Stuff.LIBREFM_KEY
 
-            val session = Requesters.lastfmUnauthedRequester.getMobileSession(
+            return Requesters.lastfmUnauthedRequester.getMobileSession(
                 apiRoot,
                 apiKey,
                 apiSecret,
                 username,
                 password
-            ).onSuccess {
+            ).mapCatching {
                 val user = UserCached(
                     username,
                     "$apiRoot/user/$username",
@@ -107,11 +109,9 @@ class GnuFm(userAccount: UserAccountSerializable) : LastFm(userAccount) {
                 )
 
                 Scrobblables.add(account)
-            }.onFailure {
-                it.printStackTrace()
-            }
 
-            return session
+                it
+            }
         }
     }
 }

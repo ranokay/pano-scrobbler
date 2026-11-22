@@ -1,0 +1,254 @@
+package com.arn.scrobble
+
+import androidx.annotation.Keep
+import co.touchlab.kermit.Logger
+import com.arn.scrobble.automation.Automation
+import com.arn.scrobble.media.CommonPlaybackState
+import com.arn.scrobble.media.DesktopMediaListener
+import com.arn.scrobble.media.MetadataInfo
+import com.arn.scrobble.media.PlaybackInfo
+import com.arn.scrobble.media.ScrobbleQueue
+import com.arn.scrobble.media.SessionInfo
+import com.arn.scrobble.media.listenForPlayingTrackEvents
+import com.arn.scrobble.utils.DesktopStuff
+import com.arn.scrobble.utils.PanoTrayUtils
+import com.arn.scrobble.utils.Stuff
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.launch
+import okhttp3.HttpUrl.Companion.toHttpUrlOrNull
+import kotlin.system.exitProcess
+
+@Keep
+object PanoNativeComponents {
+    private var desktopMediaListener: DesktopMediaListener? = null
+    val onFilePickedFlow = MutableSharedFlow<Pair<Int, String>>(extraBufferCapacity = 1)
+    val onDarkModeChangeFlow = MutableStateFlow<Boolean?>(null)
+    private var isEventLoopRunning = false
+
+    @Suppress("UnsafeDynamicallyLoadedCode")
+    fun load() {
+        System.load(DesktopStuff.getLibraryPath("pano_native_components"))
+    }
+
+    fun init() {
+        val scrobbleQueue = ScrobbleQueue(Stuff.appScope)
+        desktopMediaListener = DesktopMediaListener(
+            Stuff.appScope,
+            scrobbleQueue
+        )
+
+        startEventLoopInThread()
+        desktopMediaListener!!.start()
+
+        Stuff.appScope.launch {
+            listenForPlayingTrackEvents(scrobbleQueue, desktopMediaListener!!)
+        }
+    }
+
+    fun startEventLoopInThread() {
+        Thread {
+            isEventLoopRunning = true
+            startEventLoop()
+            isEventLoopRunning = false
+        }.apply {
+            name = "MainEventLoopThread"
+        }
+            .start()
+    }
+
+
+    // jni callbacks
+
+
+    @JvmStatic
+    fun onActiveSessionsChanged(uniqueAppIds: Array<String>, appNames: Array<String>) {
+        val sessionInfos = uniqueAppIds
+            .zip(appNames)
+            .map { (uniqueAppId, appName) ->
+                SessionInfo(
+                    rawAppId = uniqueAppId,
+                    appName = appName,
+                )
+            }
+
+        desktopMediaListener?.platformActiveSessionsChanged(sessionInfos)
+    }
+
+    @JvmStatic
+    fun onMetadataChanged(
+        uniqueAppId: String,
+        title: String,
+        artist: String,
+        album: String,
+        albumArtist: String,
+        trackNumber: Int,
+        duration: Long,
+        artUrl: String,
+        trackUrl: String,
+    ) {
+        val artUrl = artUrl.ifEmpty { null }
+            ?.takeIf {
+                it.toHttpUrlOrNull()?.topPrivateDomain() != null
+            } // i.e. not localhost, IP address, etc
+        val normalizedUrlHost = trackUrl.ifEmpty { null }
+            ?.toHttpUrlOrNull()?.host
+
+        val metadataInfo = MetadataInfo(
+            title = title,
+            artist = artist,
+            album = album,
+            albumArtist = albumArtist,
+            trackNumber = trackNumber,
+            duration = duration,
+
+            // always null for windows
+            artUrl = artUrl,
+            normalizedUrlHost = normalizedUrlHost,
+        )
+
+        desktopMediaListener?.platformMetadataChanged(uniqueAppId, metadataInfo)
+    }
+
+    @JvmStatic
+    fun onPlaybackStateChanged(
+        uniqueAppId: String,
+        state: String,
+        position: Long,
+        canSkip: Boolean,
+        canChangeChannel: Boolean,
+    ) {
+        val playbackInfo = PlaybackInfo(
+            state = CommonPlaybackState.valueOf(state),
+            position = position,
+            canSkip = canSkip,
+        )
+        desktopMediaListener?.platformPlaybackStateChanged(
+            uniqueAppId,
+            playbackInfo,
+            canChangeChannel
+        )
+    }
+
+    @JvmStatic
+    fun onTrayMenuItemClicked(id: String) {
+        PanoTrayUtils.onTrayMenuItemClickedFn(id)
+    }
+
+    @JvmStatic
+    fun onReceiveIpcCommand(command: String, arg: String) {
+        if (command == Automation.DESKTOP_FOCUS_EXISTING) {
+            PanoTrayUtils.onTrayMenuItemClickedFn(PanoTrayUtils.ItemId.Open.name)
+        } else if (command == Automation.DESKTOP_QUIT) {
+            exitProcess(0)
+        } else {
+            val wasSuccessful = Automation.executeAction(command, arg.ifEmpty { null }, null)
+            if (!wasSuccessful) {
+                Logger.w("command '$command' failed")
+            }
+        }
+    }
+
+    @JvmStatic
+    fun onFilePicked(requestId: Int, uri: String) {
+        onFilePickedFlow.tryEmit(requestId to uri)
+    }
+
+    @JvmStatic
+    fun onDarkModeChange(isDarkMode: Boolean) {
+        onDarkModeChangeFlow.value = isDarkMode
+    }
+
+    @JvmStatic
+    fun isAppIdAllowed(appId: String): Boolean {
+        return desktopMediaListener?.shouldScrobble(appId) == true
+    }
+
+    // external
+
+    @JvmStatic
+    external fun setLogFilePath(path: String)
+
+    @JvmStatic
+    external fun stopEventLoop()
+
+    @JvmStatic
+    external fun refreshSessions()
+
+    @JvmStatic
+    private external fun startEventLoop()
+
+    @JvmStatic
+    external fun skip(appId: String)
+
+    @JvmStatic
+    external fun mute(appId: String)
+
+    @JvmStatic
+    external fun unmute(appId: String)
+
+    @JvmStatic
+    external fun notify(title: String, body: String)
+
+    @JvmStatic
+    external fun setTray(
+        iconsDir: String,
+        iconName: String,
+        tooltip: String,
+        menuItemIds: Array<String>,
+        menuItemTexts: Array<String>
+    )
+
+    @JvmStatic
+    external fun getMachineId(): String
+
+    @JvmStatic
+    external fun setEnvironmentVariable(key: String, value: String)
+
+    @JvmStatic
+    external fun applyWindowEffects(handle: Long, isDark: Boolean, isBlur: Boolean)
+
+    @JvmStatic
+    external fun sendIpcCommand(command: String, arg: String): Boolean
+
+    @JvmStatic
+    external fun isFileLockedWindows(path: String): Boolean
+
+    @JvmStatic
+    external fun attachParentConsoleWindows(): Boolean
+
+    @JvmStatic
+    external fun fileChooser(
+        requestId: Int,
+        save: Boolean,
+        title: String,
+        fileName: String,
+        extensions: Array<String>
+    )
+
+    @JvmStatic
+    external fun openUrlLinux(url: String)
+
+    @JvmStatic
+    external fun autoStartLinux(add: Boolean)
+
+    @JvmStatic
+    external fun updateDiscordActivity(
+        clientId: String,
+        name: String,
+        state: String,
+        details: String,
+        largeText: String,
+        startTime: Long,
+        endTime: Long,
+        artUrl: String,
+        detailsUrl: String,
+        isPlaying: Boolean,
+        statusLine: Int,
+        buttonText: String,
+        buttonUrl: String,
+    ): Boolean
+
+    @JvmStatic
+    external fun clearDiscordActivity(shutdown: Boolean): Boolean
+}

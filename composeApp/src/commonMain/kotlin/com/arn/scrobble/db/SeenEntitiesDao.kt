@@ -7,7 +7,6 @@ import androidx.room3.Query
 import androidx.room3.Transaction
 import com.arn.scrobble.api.lastfm.Album
 import com.arn.scrobble.api.lastfm.Track
-import com.arn.scrobble.api.lastfm.webp300
 
 private fun String.norm() = this.trim()
 
@@ -63,7 +62,7 @@ interface SeenEntitiesDao {
         """
         SELECT _id, artist || '$SEP' || track AS compositeKey
         FROM ${SeenTrack.TABLE}
-        WHERE artist || '$SEP' || track IN (:keys)
+        WHERE artist || '$SEP' || track COLLATE NOCASE IN (:keys)
         """
     )
     suspend fun lookupTrackIdsForKeys(keys: List<String>): List<CompositeIdRow>
@@ -72,7 +71,7 @@ interface SeenEntitiesDao {
         """
         SELECT _id, artist || '$SEP' || album AS compositeKey
         FROM ${SeenAlbum.TABLE}
-        WHERE artist || '$SEP' || album IN (:keys)
+        WHERE artist || '$SEP' || album COLLATE NOCASE IN (:keys)
         """
     )
     suspend fun lookupAlbumIdsForKeys(keys: List<String>): List<CompositeIdRow>
@@ -118,7 +117,7 @@ interface SeenEntitiesDao {
         """
         SELECT trackId || '$SEP' || albumId AS compositeKey, priority
         FROM ${SeenTrackAlbumAssociation.TABLE}
-        WHERE trackId || '$SEP' || albumId IN (:keys)
+        WHERE trackId || '$SEP' || albumId COLLATE NOCASE IN (:keys)
         """
     )
     suspend fun lookupAssociationPriorities(keys: List<String>): List<AssociationPriorityRow>
@@ -179,7 +178,7 @@ interface SeenEntitiesDao {
             val trackId = trackIds[idKey(item.artist.name.norm(), item.name.norm())] ?: continue
             val albumId = albumIds[idKey(albumArtist, albumName)] ?: continue
 
-            resolved.add(Resolved(trackId, albumId, item.album.webp300, item.userloved))
+            resolved.add(Resolved(trackId, albumId, item.album.image?.medium, item.userloved))
         }
 
         // updateAlbumArtIfMissing is still per-row SQL
@@ -255,7 +254,7 @@ interface SeenEntitiesDao {
      */
     @Transaction
     suspend fun saveTopAlbumArts(items: List<Album>) {
-        val filtered = items.filter { it.artist != null && !it.webp300.isNullOrEmpty() }
+        val filtered = items.filter { it.artist != null && !it.image?.medium.isNullOrEmpty() }
         if (filtered.isEmpty()) return
 
         val pairs = filtered.map { it.artist!!.name.norm() to it.name.norm() }
@@ -263,7 +262,7 @@ interface SeenEntitiesDao {
 
         for (item in filtered) {
             val albumId = albumIds[idKey(item.artist!!.name.norm(), item.name.norm())] ?: continue
-            updateAlbumArtIfMissing(albumId, item.webp300)
+            updateAlbumArtIfMissing(albumId, item.image?.medium)
         }
     }
 
@@ -286,7 +285,7 @@ interface SeenEntitiesDao {
         val albumId =
             resolveAlbumIds(listOf(normAlbumArtist to normAlbum)).values.firstOrNull() ?: return
 
-        updateAlbumArtIfMissing(albumId, album.webp300)
+        updateAlbumArtIfMissing(albumId, album.image?.medium)
 
         val trackPairs = tracks.map { it.artist.name.norm() to it.name.norm() }
         val trackIds = resolveTrackIds(trackPairs).map { (_, id) -> id }

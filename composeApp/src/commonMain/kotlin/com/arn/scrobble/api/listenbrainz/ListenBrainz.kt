@@ -19,8 +19,7 @@ import com.arn.scrobble.api.cache.CacheStrategy
 import com.arn.scrobble.api.lastfm.Album
 import com.arn.scrobble.api.lastfm.ApiException
 import com.arn.scrobble.api.lastfm.Artist
-import com.arn.scrobble.api.lastfm.ImageSize
-import com.arn.scrobble.api.lastfm.LastFmImage
+import com.arn.scrobble.api.lastfm.ImagesUrls
 import com.arn.scrobble.api.lastfm.MusicEntry
 import com.arn.scrobble.api.lastfm.PageAttr
 import com.arn.scrobble.api.lastfm.PageEntries
@@ -34,8 +33,13 @@ import com.arn.scrobble.charts.TimePeriod
 import com.arn.scrobble.charts.TimePeriodType
 import com.arn.scrobble.db.PanoDb
 import com.arn.scrobble.db.SeenTrackAlbumAssociation
+import com.arn.scrobble.pref.AppItem
+import com.arn.scrobble.utils.PlatformStuff
 import com.arn.scrobble.utils.Stuff
 import com.arn.scrobble.utils.Stuff.cacheStrategy
+import com.arn.scrobble.utils.VariantStuff
+import com.arn.scrobble.utils.determineLocalNetworkPermissionException
+import com.arn.scrobble.utils.wrapLocalNetworkHandshakeException
 import io.ktor.client.request.HttpRequestBuilder
 import io.ktor.client.request.header
 import io.ktor.client.request.parameter
@@ -54,8 +58,13 @@ import kotlin.math.min
 
 
 class ListenBrainz(userAccount: UserAccountSerializable) : Scrobblable(userAccount) {
+    private val client
+        get() =
+            if (userAccount.apiRoot != null && userAccount.tlsTrustAll)
+                Requesters.genericKtorTrustAllClient
+            else
+                Requesters.genericKtorClient
 
-    private val client get() = Requesters.genericKtorClient
     private val outerScope = Stuff.appScope
 
     private fun HttpRequestBuilder.commonReq() {
@@ -68,6 +77,21 @@ class ListenBrainz(userAccount: UserAccountSerializable) : Scrobblable(userAccou
         )
     }
 
+    private fun extractMbids(raw: String?): List<String>? =
+        if (raw.isNullOrEmpty()) null
+        else MBID_REGEX.findAll(raw)
+            .map { it.value }
+            .distinct()
+            .toList()
+            .ifEmpty { null }
+
+    private fun appIdToName(appId: String?): String? =
+        if (appId == null || !VariantStuff.isNonPlay)
+            null
+        else
+            AppItem(appId, label = PlatformStuff.loadApplicationLabel(appId))
+                .friendlyLabel
+
     private suspend fun submitListens(
         scrobbleDatas: List<ScrobbleData>,
         listenType: ListenBrainzListenType,
@@ -79,8 +103,6 @@ class ListenBrainz(userAccount: UserAccountSerializable) : Scrobblable(userAccou
             listenType,
             scrobbleDatas.map { scrobbleData ->
 
-//                val pkgName = scrobbleData.pkgName?.let { PackageName(it) }
-
                 ListenBrainzPayload(
                     scrobbleData.timestamp.takeIf { listenType != ListenBrainzListenType.playing_now },
                     ListenBrainzTrackMetadata(
@@ -89,6 +111,14 @@ class ListenBrainz(userAccount: UserAccountSerializable) : Scrobblable(userAccou
                         track_name = scrobbleData.track,
                         additional_info = ListenBrainzAdditionalInfo(
                             duration_ms = scrobbleData.safeDuration(),
+                            recording_mbid = scrobbleData.extraTags[MUSICBRAINZ_TRACKID],
+                            release_mbid = scrobbleData.extraTags[MUSICBRAINZ_ALBUMID],
+                            // is multi-value
+                            artist_mbids = extractMbids(scrobbleData.extraTags[MUSICBRAINZ_ARTISTID]),
+                            release_group_mbid = scrobbleData.extraTags[MUSICBRAINZ_RELEASEGROUPID],
+                            track_mbid = scrobbleData.extraTags[MUSICBRAINZ_RELEASETRACKID],
+                            isrc = scrobbleData.extraTags[ISRC],
+                            media_player = appIdToName(scrobbleData.appId),
                             submission_client = BuildKonfig.APP_NAME,
                             submission_client_version = BuildKonfig.VER_NAME,
                         )
@@ -130,20 +160,10 @@ class ListenBrainz(userAccount: UserAccountSerializable) : Scrobblable(userAccou
 //        200 OK – lookup succeeded, does not indicate whether a match was found or not
     }
 
-    private fun createImageMap(releaseMbid: String?): List<LastFmImage>? {
-        return if (releaseMbid != null) listOf(
-            LastFmImage(
-                ImageSize.medium.name,
-                "https://coverartarchive.org/release/$releaseMbid/front-250"
-            ),
-            LastFmImage(
-                ImageSize.large.name,
-                "https://coverartarchive.org/release/$releaseMbid/front-500"
-            ),
-            LastFmImage(
-                ImageSize.extralarge.name,
-                "https://coverartarchive.org/release/$releaseMbid/front-500"
-            ),
+    private fun createImageUrls(releaseMbid: String?): ImagesUrls? {
+        return if (releaseMbid != null) ImagesUrls(
+            "https://coverartarchive.org/release/$releaseMbid/front-250",
+            "https://coverartarchive.org/release/$releaseMbid/front-500",
         )
         else
             null
@@ -219,7 +239,7 @@ class ListenBrainz(userAccount: UserAccountSerializable) : Scrobblable(userAccou
                     name = it.track_metadata.release_name,
                     mbid = it.track_metadata.mbid_mapping?.release_mbid,
                     artist = artist,
-                    image = createImageMap(it.track_metadata.mbid_mapping?.release_mbid),
+                    image = createImageUrls(it.track_metadata.mbid_mapping?.release_mbid),
                 )
             else
                 null
@@ -337,7 +357,7 @@ class ListenBrainz(userAccount: UserAccountSerializable) : Scrobblable(userAccou
                     name = it.track_metadata.release_name,
                     mbid = it.track_metadata.mbid_mapping?.release_mbid,
                     artist = artist!!,
-                    image = createImageMap(it.track_metadata.mbid_mapping?.release_mbid),
+                    image = createImageUrls(it.track_metadata.mbid_mapping?.release_mbid),
                 )
             else
                 null
@@ -444,7 +464,7 @@ class ListenBrainz(userAccount: UserAccountSerializable) : Scrobblable(userAccou
                         mbid = it.release_mbid,
                         playcount = it.listen_count.toLong(),
                         userplaycount = it.listen_count,
-                        image = createImageMap(it.release_mbid),
+                        image = createImageUrls(it.release_mbid),
                     )
                 }
 
@@ -459,7 +479,7 @@ class ListenBrainz(userAccount: UserAccountSerializable) : Scrobblable(userAccou
                             name = albumName,
                             artist = artist,
                             mbid = it.release_mbid,
-                            image = createImageMap(it.release_mbid),
+                            image = createImageUrls(it.release_mbid),
                         )
                     }
 
@@ -590,22 +610,23 @@ class ListenBrainz(userAccount: UserAccountSerializable) : Scrobblable(userAccou
     companion object {
 
         suspend fun authAndGetSession(userAccountTemp: UserAccountTemp): Result<Session> {
-            val client = Requesters.genericKtorClient
+            val client = if (userAccountTemp.apiRoot != null && userAccountTemp.tlsTrustAll)
+                Requesters.genericKtorTrustAllClient
+            else
+                Requesters.genericKtorClient
 
-            val result =
-                client.getResult<ValidateToken>("${userAccountTemp.apiRoot}1/validate-token") {
-                    contentType(ContentType.Application.Json)
-                    header("Authorization", "token ${userAccountTemp.authKey}")
-                }
+            determineLocalNetworkPermissionException(userAccountTemp.apiRoot)?.let {
+                return Result.failure(it)
+            }
 
-            result.onSuccess { validateToken ->
-                validateToken.user_name ?: return Result.failure(ApiException(-1, "Invalid token"))
-                val isCustom = userAccountTemp.apiRoot != Stuff.LISTENBRAINZ_API_ROOT
-                val profileUrl = if (isCustom)
-                    userAccountTemp.apiRoot!!.toHttpUrl()
-                        .let { url -> url.scheme + "://" + url.host }
-                else
-                    "https://listenbrainz.org/user/${validateToken.user_name}"
+            return client.getResult<ValidateToken>("${userAccountTemp.apiRoot}1/validate-token") {
+                contentType(ContentType.Application.Json)
+                header("Authorization", "token ${userAccountTemp.authKey}")
+            }.mapCatching { validateToken ->
+                validateToken.user_name ?: throw ApiException(-1, "Invalid token")
+
+                val profileUrl =
+                    guessProfileUrl(userAccountTemp.apiRoot, validateToken.user_name)
 
                 val account = UserAccountSerializable(
                     userAccountTemp.type,
@@ -618,12 +639,61 @@ class ListenBrainz(userAccount: UserAccountSerializable) : Scrobblable(userAccou
                     ),
                     userAccountTemp.authKey,
                     userAccountTemp.apiRoot,
+                    userAccountTemp.tlsTrustAll,
                 )
 
                 Scrobblables.add(account)
+
+                Session(validateToken.user_name, userAccountTemp.authKey)
+            }.recoverCatching {
+                throw wrapLocalNetworkHandshakeException(
+                    it,
+                    userAccountTemp.apiRoot
+                ) ?: it
+            }
+        }
+
+        private fun guessProfileUrl(apiRoot: String?, userName: String): String {
+            val profileUrl = if (apiRoot != null && apiRoot != Stuff.LISTENBRAINZ_API_ROOT) {
+                val url = apiRoot.toHttpUrl()
+                val topPrivateDomain = url.topPrivateDomain()
+
+                url.scheme + "://" + topPrivateDomain
+            } else {
+                "https://listenbrainz.org/user/$userName"
             }
 
-            return result.map { Session(it.user_name, userAccountTemp.authKey) }
+            return profileUrl
         }
+
+        // MBIDs are UUIDs: 8-4-4-4-12 hex, lookarounds stop matching inside a longer hex run, but still allow any non-hex delimiter
+        private val MBID_REGEX = Regex(
+            "(?<![0-9a-fA-F])" +
+                    "[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}" +
+                    "(?![0-9a-fA-F])"
+        )
+
+//        https://github.com/OxygenCobalt/Auxio/issues/1268#issuecomment-6152376651
+
+        const val MUSICBRAINZ_TRACKID = "org.musicbrainz.MUSICBRAINZ_TRACKID"
+        const val MUSICBRAINZ_RELEASETRACKID = "org.musicbrainz.MUSICBRAINZ_RELEASETRACKID"
+        const val MUSICBRAINZ_ALBUMID = "org.musicbrainz.MUSICBRAINZ_ALBUMID"
+        const val MUSICBRAINZ_ALBUMARTISTID = "org.musicbrainz.MUSICBRAINZ_ALBUMARTISTID"
+        const val MUSICBRAINZ_ARTISTID = "org.musicbrainz.MUSICBRAINZ_ARTISTID"
+        const val MUSICBRAINZ_RELEASEGROUPID = "org.musicbrainz.MUSICBRAINZ_RELEASEGROUPID"
+        const val ACOUSTID_ID = "org.musicbrainz.ACOUSTID_ID"
+        const val ISRC = "org.musicbrainz.ISRC"
+        const val BARCODE = "org.musicbrainz.BARCODE"
+        const val CATALOGNUMBER = "org.musicbrainz.CATALOGNUMBER"
+
+        val MUSICBRAINZ_KEY_SET = setOf(
+            MUSICBRAINZ_TRACKID,
+            MUSICBRAINZ_RELEASETRACKID,
+            MUSICBRAINZ_ALBUMID,
+            MUSICBRAINZ_ALBUMARTISTID,
+            MUSICBRAINZ_ARTISTID,
+            MUSICBRAINZ_RELEASEGROUPID,
+            ISRC,
+        )
     }
 }

@@ -26,6 +26,7 @@ expect object PlatformStuff {
     val isJava8OrGreater: Boolean
 
     val supportsDynamicColors: Boolean
+    val supportsBlur: Boolean
 
     val isTv: Boolean
 
@@ -34,6 +35,8 @@ expect object PlatformStuff {
     val hasSystemLocaleStore: Boolean
 
     val appIdPlaceholder: String
+
+    val supportsSpotifyRemote: Boolean
 
     suspend fun checkScrobblerState(requestRebind: Boolean): ScrobblerState
 

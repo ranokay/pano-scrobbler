@@ -14,7 +14,6 @@ import com.arn.scrobble.api.lastfm.LastFm
 import com.arn.scrobble.ui.PanoSnackbarVisuals
 import com.arn.scrobble.utils.PlatformStuff
 import com.arn.scrobble.utils.Stuff
-import com.arn.scrobble.utils.Stuff.mapConcurrently
 import com.arn.scrobble.utils.redactedMessage
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -22,16 +21,17 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.supervisorScope
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.jetbrains.compose.resources.getString
 import pano_scrobbler.composeapp.generated.resources.Res
 import pano_scrobbler.composeapp.generated.resources.no_scrobbles
 import pano_scrobbler.composeapp.generated.resources.pin_limit_reached
+import kotlin.time.Duration.Companion.milliseconds
 
 
 class FriendsVM(user: UserCached, private val showPinned: Boolean) : ViewModel() {
@@ -51,7 +51,7 @@ class FriendsVM(user: UserCached, private val showPinned: Boolean) : ViewModel()
                     it.distinctBy { it.name } // hotfix for crash
                         .sortedBy { it.order }
                 }
-                .stateIn(viewModelScope, SharingStarted.Lazily, emptyList())
+                .stateIn(viewModelScope, SharingStarted.Lazily, null)
         else
             MutableStateFlow<List<UserCached>>(emptyList()).asStateFlow()
 
@@ -59,6 +59,7 @@ class FriendsVM(user: UserCached, private val showPinned: Boolean) : ViewModel()
 
     private val _lastFriendsRefreshTime = MutableStateFlow<Long?>(null)
     val lastFriendsRefreshTime = _lastFriendsRefreshTime.asStateFlow()
+    private var pinnedFriendsUpdated = false
 
     val friends = Pager(
         config = PagingConfig(
@@ -76,15 +77,29 @@ class FriendsVM(user: UserCached, private val showPinned: Boolean) : ViewModel()
         }
     ).flow
         .cachedIn(viewModelScope)
-        .combine(pinnedFriends) { pagingData, pinnedFriends ->
+        .combine(pinnedFriends.filterNotNull()) { pagingData, pinnedFriends ->
             val keysTillNow = pinnedFriends.map { it.name }.toMutableSet()
+            val pinnedFriendsToUpdate = mutableListOf<UserCached>()
+            val updatePins = !pinnedFriendsUpdated && showPinned
 
-            pagingData.filter {
+            val pd = pagingData.filter {
                 val key = it.name
                 val keep = key !in keysTillNow
                 keysTillNow += key
+                if (!keep && updatePins) {
+                    pinnedFriendsToUpdate += it
+                }
                 keep
             }
+
+            if (updatePins) {
+                pinnedFriendsUpdated = true
+                viewModelScope.launch {
+                    updatePins(pinnedFriendsToUpdate, pinnedFriends)
+                }
+            }
+
+            pd
         }
         .cachedIn(viewModelScope)
 
@@ -92,16 +107,10 @@ class FriendsVM(user: UserCached, private val showPinned: Boolean) : ViewModel()
     private val _sortedFriends = MutableStateFlow<List<UserCached>?>(null)
     val sortedFriends = _sortedFriends.asStateFlow()
 
-    init {
-        viewModelScope.launch {
-            refreshPins()
-        }
-    }
-
     suspend fun loadFriendsRecents(username: String) {
         if (friendsExtraDataMap.value[username]?.errorMessage != null) return
 
-        delay(Stuff.FRIENDS_RECENTS_DELAY)
+        delay(Stuff.FRIENDS_RECENTS_DELAY.milliseconds)
 
         _friendsExtraDataMap.value += username to friendsRecentsMutex.withLock {
             Scrobblables.current!!.getRecents(
@@ -131,10 +140,11 @@ class FriendsVM(user: UserCached, private val showPinned: Boolean) : ViewModel()
 
     fun addPinAndSave(user: UserCached) {
         if (!showPinned) return
+        val pinnedFriends = pinnedFriends.value ?: return
 
-        val newUser = user.copy(order = pinnedFriends.value.size)
+        val newUser = user.copy(order = pinnedFriends.size)
 
-        if (pinnedFriends.value.size < Stuff.MAX_PINNED_FRIENDS) {
+        if (pinnedFriends.size < Stuff.MAX_PINNED_FRIENDS) {
             viewModelScope.launch {
                 mainPrefs.updateData {
                     it.copy(
@@ -214,30 +224,40 @@ class FriendsVM(user: UserCached, private val showPinned: Boolean) : ViewModel()
         }
     }
 
-    private suspend fun refreshPins() {
-        supervisorScope {
-            val lastfmSession =
-                Scrobblables.current as? LastFm
-                    ?: return@supervisorScope
-            var modifiedCount = 0
-            val now = System.currentTimeMillis()
-            val newPinnedFriends = pinnedFriends.value
-                .filter { now - it.lastUpdated > Stuff.PINNED_FRIENDS_CACHE_TIME }
-                .mapConcurrently(2) { userSerializable ->
+    private suspend fun updatePins(
+        pinnedFriends: List<UserCached>,
+        updatedPinnedFriends: List<UserCached>
+    ) {
+        if (!showPinned) return
 
-                    lastfmSession.userGetInfo(userSerializable.name)
-                        .map { user ->
-                            modifiedCount++
-                            user.toUserCached()
-                        }.getOrDefault(userSerializable)
-                }
+        val lastfmSession = Scrobblables.current as? LastFm ?: return
+        var modifiedCount = 0
+        val now = System.currentTimeMillis()
+        val updatedPinnedFriendsNames = updatedPinnedFriends.map { it.name }.toSet()
 
-            if (modifiedCount > 0) {
-                mainPrefs.updateData {
-                    it.copy(
-                        pinnedFriends = it.pinnedFriends + (it.currentAccountType to newPinnedFriends)
-                    )
+        val otherPinnedFriends = pinnedFriends
+            .filter { it.name !in updatedPinnedFriendsNames && now - it.lastUpdated > Stuff.PINNED_FRIENDS_CACHE_TIME }
+            .map { userSerializable ->
+                lastfmSession.userGetInfo(userSerializable.name)
+                    .map { user ->
+                        modifiedCount++
+                        user.toUserCached(order = userSerializable.order)
+                    }.getOrDefault(userSerializable)
+            }
+
+        if (modifiedCount > 0) {
+            mainPrefs.updateData {
+                val currentAccountPinned = buildList {
+                    addAll(updatedPinnedFriends)
+                    addAll(otherPinnedFriends)
+                    addAll(it.pinnedFriends[it.currentAccountType].orEmpty())
                 }
+                    .distinctBy { it.name } // newPinnedFriends wins on dupes
+                    .sortedBy { it.order }
+
+                it.copy(
+                    pinnedFriends = it.pinnedFriends + (it.currentAccountType to currentAccountPinned)
+                )
             }
         }
     }

@@ -1,4 +1,6 @@
 import com.android.build.gradle.internal.cxx.configure.gradleLocalProperties
+import com.google.firebase.crashlytics.buildtools.gradle.CrashlyticsExtension
+import com.google.gms.googleservices.GoogleServicesPlugin
 import com.mikepenz.aboutlibraries.plugin.DuplicateMode
 import com.mikepenz.aboutlibraries.plugin.StrictMode
 
@@ -6,33 +8,22 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.aboutlibraries)
     alias(libs.plugins.baselineprofile)
+    alias(libs.plugins.google.services)
+    alias(libs.plugins.crashlytics)
 }
 
-val requestedTasks = gradle.startParameter.taskNames.map { it.lowercase() }
+val APP_ID = rootProject.extra["APP_ID"] as String
+val VER_CODE = rootProject.extra["VER_CODE"] as Int
+val VER_NAME = rootProject.extra["VER_NAME"] as String
+val APP_NAME = rootProject.extra["APP_NAME"] as String
+val APP_NAME_NO_SPACES = rootProject.extra["APP_NAME_NO_SPACES"] as String
 
-if (requestedTasks.none { it.contains("releasegithub") }) {
-    apply(plugin = libs.plugins.google.services.get().pluginId)
-    apply(plugin = libs.plugins.crashlytics.get().pluginId)
+kotlin {
+    jvmToolchain(25)
 }
-
-val aboutLibrariesVariant = when {
-    requestedTasks.any { it.contains("releasegithub") } -> "releaseGithub"
-    requestedTasks.any { it.contains("release") } -> "release"
-    else -> null
-}
-
-val APP_ID: String by rootProject.extra
-val VER_CODE: Int by rootProject.extra
-val VER_NAME: String by rootProject.extra
-val APP_NAME: String by rootProject.extra
-val APP_NAME_NO_SPACES: String by rootProject.extra
-
-val localProperties = gradleLocalProperties(rootDir, project.providers)
-    .map { it.key to it.value.toString() }
-    .toMap()
 
 android {
-    buildToolsVersion = "37.0.0"
+//    buildToolsVersion = "37.0.0"
 
     compileSdk {
         version = release(libs.versions.targetSdk.get().toInt()) {
@@ -48,7 +39,6 @@ android {
         versionCode = VER_CODE
         versionName = VER_NAME
         base.archivesName = APP_NAME_NO_SPACES
-//        ndkVersion = "29.0.14206865"
     }
 
     buildFeatures {
@@ -58,6 +48,12 @@ android {
     }
 
     buildTypes {
+        all {
+            configure<CrashlyticsExtension> {
+                mappingFileUploadEnabled = (name == "release")
+            }
+        }
+
         getByName("release") {
             isShrinkResources = true
             isMinifyEnabled = true
@@ -95,20 +91,17 @@ android {
                 enableSplit = false
             }
         }
-    }
 
-    compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_21
-        targetCompatibility = JavaVersion.VERSION_21
-    }
-
-    testOptions {
-        unitTests {
-            isIncludeAndroidResources = true
+        dex {
+            useLegacyPackaging = false
         }
     }
 
-
+    lint {
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(25)
+        }
+    }
 
     dependenciesInfo {
         includeInApk = false
@@ -116,39 +109,51 @@ android {
     }
 
     signingConfigs {
+        val localProperties = gradleLocalProperties(rootDir, project.providers)
+
+        val releaseKeystorePath = localProperties.getProperty("release.keystorePath")
+        val releaseStorePassword = localProperties.getProperty("release.storePassword")
+        val releaseAlias = localProperties.getProperty("release.alias")
+        val releasePassword = localProperties.getProperty("release.password")
+
         if (
-            localProperties["release.keystore"] != null &&
-            localProperties["release.storePassword"] != null &&
-            localProperties["release.alias"] != null &&
-            localProperties["release.password"] != null
+            releaseKeystorePath != null &&
+            releaseStorePassword != null &&
+            releaseAlias != null &&
+            releasePassword != null
         ) {
             register("release") {
-                storeFile = file(localProperties["release.keystore"]!!)
-                storePassword = localProperties["release.storePassword"]
-                keyAlias = localProperties["release.alias"]
-                keyPassword = localProperties["release.password"]
+                storeFile = file(releaseKeystorePath)
+                storePassword = releaseStorePassword
+                keyAlias = releaseAlias
+                keyPassword = releasePassword
             }
         }
 
+        val releaseGithubKeystorePath = localProperties.getProperty("releaseGithub.keystorePath")
+        val releaseGithubStorePassword = localProperties.getProperty("releaseGithub.storePassword")
+        val releaseGithubAlias = localProperties.getProperty("releaseGithub.alias")
+        val releaseGithubPassword = localProperties.getProperty("releaseGithub.password")
+
         if (
-            localProperties["releaseGithub.keystore"] != null &&
-            localProperties["releaseGithub.storePassword"] != null &&
-            localProperties["releaseGithub.alias"] != null &&
-            localProperties["releaseGithub.password"] != null
+            releaseGithubKeystorePath != null &&
+            releaseGithubStorePassword != null &&
+            releaseGithubAlias != null &&
+            releaseGithubPassword != null
         ) {
             register("releaseGithub") {
-                storeFile = file(localProperties["releaseGithub.keystore"]!!)
-                storePassword = localProperties["releaseGithub.storePassword"]
-                keyAlias = localProperties["releaseGithub.alias"]
-                keyPassword = localProperties["releaseGithub.password"]
+                storeFile = file(releaseGithubKeystorePath)
+                storePassword = releaseGithubStorePassword
+                keyAlias = releaseGithubAlias
+                keyPassword = releaseGithubPassword
             }
         }
     }
 
     buildTypes {
         getByName("debug") {
-//            signingConfig = signingConfigs.findByName("releaseGithub")
-            signingConfig = signingConfigs.findByName("release")
+            signingConfig = signingConfigs.findByName("releaseGithub")
+//            signingConfig = signingConfigs.findByName("release")
         }
 
         getByName("release") {
@@ -175,6 +180,11 @@ baselineProfile {
     dexLayoutOptimization = true
 }
 
+googleServices {
+    // 'releaseGithub' variant does not need a google-services.json
+    missingGoogleServicesStrategy = GoogleServicesPlugin.MissingGoogleServicesStrategy.WARN
+}
+
 aboutLibraries {
     offlineMode = true
 
@@ -197,20 +207,9 @@ aboutLibraries {
             "developerConnection"
         )
 
-        variant = aboutLibrariesVariant
+        outputFile =
+            file("../composeApp/src/androidMain/composeResources/files/aboutlibraries.json")
     }
-
-    exports {
-        create("release") {
-            outputFile =
-                file("../composeApp/src/androidMain/composeResources/files/aboutlibraries.json")
-        }
-        create("releaseGithub") {
-            outputFile =
-                file("../composeApp/src/androidMain/composeResources/files/aboutlibraries.json")
-        }
-    }
-
 }
 
 tasks.register<Copy>("copyGithubReleaseApk") {
@@ -224,7 +223,18 @@ tasks.register<Copy>("copyGithubReleaseApk") {
 }
 
 tasks.configureEach {
-    if (name == "packageReleaseGithub") {
-        finalizedBy("copyGithubReleaseApk")
+    when (name) {
+        "packageReleaseGithub" -> {
+            finalizedBy("copyGithubReleaseApk")
+        }
+
+        "exportLibraryDefinitions" -> {
+            finalizedBy(":composeApp:copyNonXmlValueResourcesForAndroidMain")
+        }
+
+        "packageReleaseGithubResources", "packageReleaseResources" -> {
+            finalizedBy("exportLibraryDefinitions")
+        }
+
     }
 }

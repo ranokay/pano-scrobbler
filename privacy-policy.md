@@ -2,7 +2,7 @@
 
 #### Last updated
 
-2026, March 15 UTC
+2026, September 27 UTC
 
 ### Introduction
 
@@ -77,7 +77,7 @@ these apps, if they have been enabled for scrobbling by the user:
 - Shazam
 - Ambient Music Mod
 - Audile
-- Pixel's Now Playing (before the March 2026 Pixel Feature Drop)
+- Pixel's Now Playing
 
 ### Links to Other Sites
 
@@ -89,8 +89,7 @@ responsibility for the content, privacy policies, or practices of any third-part
 ### Children’s Privacy
 
 This app is intended for a general audience. I do not knowingly collect personally identifiable
-contact information from children under 13. Please refer to our third
-party [Last.fm's children's privacy policy](https://privacy.paramount.com/en/childrens).
+contact information from children under 13.
 
 ### Changes to This Privacy Policy
 

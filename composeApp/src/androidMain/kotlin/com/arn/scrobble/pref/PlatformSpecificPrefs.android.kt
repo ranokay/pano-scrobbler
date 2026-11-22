@@ -14,26 +14,23 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.platform.LocalContext
 import com.arn.scrobble.MasterSwitchQS
 import com.arn.scrobble.R
-import com.arn.scrobble.navigation.PanoRoute
 import com.arn.scrobble.ui.PanoSnackbarVisuals
 import com.arn.scrobble.utils.AndroidStuff
 import com.arn.scrobble.utils.PlatformStuff
 import com.arn.scrobble.utils.Stuff
 import com.arn.scrobble.widget.ChartsWidgetConfigActivity
 import com.arn.scrobble.widget.ChartsWidgetProvider
+import com.arn.scrobble.work.CommonWorkProgress
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import org.jetbrains.compose.resources.getString
 import org.jetbrains.compose.resources.stringResource
 import pano_scrobbler.composeapp.generated.resources.Res
-import pano_scrobbler.composeapp.generated.resources.grant_notification_access
-import pano_scrobbler.composeapp.generated.resources.persistent_noti_desc
-import pano_scrobbler.composeapp.generated.resources.persistent_noti_oems
-import pano_scrobbler.composeapp.generated.resources.pref_master
+import pano_scrobbler.composeapp.generated.resources.persistent_noti_fgs
+import pano_scrobbler.composeapp.generated.resources.persistent_noti_hide
 import pano_scrobbler.composeapp.generated.resources.pref_master_qs_add
 import pano_scrobbler.composeapp.generated.resources.pref_master_qs_already_addded
 import pano_scrobbler.composeapp.generated.resources.pref_noti
-import pano_scrobbler.composeapp.generated.resources.pref_offline_info
 import pano_scrobbler.composeapp.generated.resources.pref_widget_charts
 import pano_scrobbler.composeapp.generated.resources.scrobbler_off
 import pano_scrobbler.composeapp.generated.resources.scrobbler_on
@@ -42,7 +39,7 @@ import pano_scrobbler.composeapp.generated.resources.show_persistent_noti
 actual object PlatformSpecificPrefs {
     actual fun prefQuickSettings(filteredItem: FilteredItem, scrobblerEnabled: Boolean) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && !PlatformStuff.isTv) {
-            filteredItem("master_qs_add", Res.string.pref_master_qs_add, null) { title ->
+            filteredItem("quick_settings", Res.string.pref_master_qs_add, null) { title ->
                 val scrobblerEnabledText =
                     stringResource(if (scrobblerEnabled) Res.string.scrobbler_on else Res.string.scrobbler_off)
                 val context = LocalContext.current
@@ -118,7 +115,7 @@ actual object PlatformSpecificPrefs {
         }
     }
 
-    actual fun prefNotifications(filteredItem: FilteredItem, notiPersistent: Boolean) {
+    actual fun prefNotifications(filteredItem: FilteredItem) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O && !PlatformStuff.isTv) {
             filteredItem("notifications", Res.string.pref_noti, null) { title ->
                 val context = LocalContext.current
@@ -130,19 +127,19 @@ actual object PlatformSpecificPrefs {
                 )
             }
         }
+    }
 
-        if (AndroidStuff.canShowPersistentNotiIfEnabled && !PlatformStuff.isTv) {
+    actual fun prefPersistentNotification(filteredItem: FilteredItem, notiPersistent: Boolean) {
+        if (!PlatformStuff.isTv) {
             filteredItem(
-                MainPrefs::notiPersistent.name,
-                Res.string.show_persistent_noti,
+                "persistent_notification",
+                Res.string.persistent_noti_fgs,
                 null
             ) { title ->
                 SwitchPref(
                     text = title,
-                    summary = stringResource(
-                        Res.string.persistent_noti_desc,
-                        stringResource(Res.string.persistent_noti_oems)
-                    ),
+                    summary = stringResource(Res.string.show_persistent_noti) + "\n" +
+                            stringResource(Res.string.persistent_noti_hide),
                     value = notiPersistent,
                     copyToSave = {
                         copy(notiPersistent = it)
@@ -154,49 +151,25 @@ actual object PlatformSpecificPrefs {
 
     actual fun prefAutostart(filteredItem: FilteredItem) {}
 
-    actual fun discordRpc(filteredItem: FilteredItem, onNavigate: (PanoRoute) -> Unit) {
-        // no-op
-    }
-
-    actual fun tidalSteelSeries(filteredItem: FilteredItem, enabled: Boolean) {
-    }
+    actual fun prefAddToAppLauncher(filteredItem: FilteredItem) {}
 
     actual fun deezerApi(filteredItem: FilteredItem, enabled: Boolean) {
     }
 
-    actual fun prefScrobbler(
-        filteredItem: FilteredItem,
+    actual fun onPrefScrobblerToggled(
         scrobblerEnabled: Boolean,
-        nlsEnabled: Boolean,
-        onNavigate: (PanoRoute) -> Unit,
     ) {
-        filteredItem(MainPrefs::scrobblerEnabled.name, Res.string.pref_master, null) { title ->
-            val scope = rememberCoroutineScope()
-            val context = LocalContext.current
-
-            SwitchPref(
-                text = title,
-                summary = if (!nlsEnabled)
-                    stringResource(Res.string.grant_notification_access)
-                else
-                    stringResource(Res.string.pref_offline_info),
-                value = scrobblerEnabled && nlsEnabled,
-                copyToSave = {
-                    if (!nlsEnabled) {
-                        onNavigate(PanoRoute.Onboarding)
-                        this
-                    } else {
-                        scope.launch(Dispatchers.IO) {
-                            MasterSwitchQS.requestListeningState(context)
-                            if (it) {
-                                AndroidStuff.requestRebindFromContentProvider(context.contentResolver)
-                            }
-                        }
-
-                        copy(scrobblerEnabled = it)
-                    }
-                }
-            )
+        Stuff.appScope.launch(Dispatchers.IO) {
+            MasterSwitchQS.requestListeningState(AndroidStuff.applicationContext)
+            if (scrobblerEnabled) {
+                AndroidStuff.requestRebindFromContentProvider(AndroidStuff.applicationContext.contentResolver)
+            }
         }
+    }
+
+    actual fun updateCheck(
+        filteredItem: FilteredItem, enabled: Boolean,
+        updateProgress: CommonWorkProgress?
+    ) {
     }
 }

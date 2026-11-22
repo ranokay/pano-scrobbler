@@ -26,13 +26,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.arn.scrobble.icons.ArrowRightAutoMirrored
 import com.arn.scrobble.icons.Icons
-import com.arn.scrobble.icons.automirrored.ArrowRight
 import com.arn.scrobble.ui.ErrorText
 import com.arn.scrobble.ui.FilePicker
 import com.arn.scrobble.ui.FilePickerMode
 import com.arn.scrobble.ui.FileType
-import com.arn.scrobble.ui.OutlinedToggleButtons
+import com.arn.scrobble.ui.PanoToggleButtonGroup
 import com.arn.scrobble.utils.PlatformStuff
 import com.arn.scrobble.utils.Stuff
 import com.arn.scrobble.utils.redactedMessage
@@ -160,6 +160,7 @@ fun ExportScreen(
 
                         mdnsStatus.services.forEach {
                             TextButton(
+                                shapes = ButtonDefaults.shapes(),
                                 onClick = {
                                     confirmed = true
                                     viewModel.exportToServer(it)
@@ -167,7 +168,7 @@ fun ExportScreen(
                                 modifier = Modifier.align(Alignment.CenterHorizontally)
                             ) {
                                 Icon(
-                                    Icons.AutoMirrored.ArrowRight,
+                                    Icons.ArrowRightAutoMirrored,
                                     contentDescription = null,
                                     modifier = Modifier.size(ButtonDefaults.IconSize)
                                 )
@@ -241,8 +242,8 @@ fun ImExportModeSelector(
             style = MaterialTheme.typography.titleLarge,
         )
     } else {
-        OutlinedToggleButtons(
-            items = listOf(
+        PanoToggleButtonGroup(
+            texts = listOf(
                 stringResource(Res.string.scrobble_to_file),
                 stringResource(Res.string.pref_imexport_network),
             ),

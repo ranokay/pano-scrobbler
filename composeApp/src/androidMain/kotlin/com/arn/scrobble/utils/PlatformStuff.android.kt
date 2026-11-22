@@ -94,6 +94,10 @@ actual object PlatformStuff {
     }
 
     actual val supportsDynamicColors = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    actual val supportsBlur by lazy { Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && !isTv }
+
+    actual val supportsSpotifyRemote
+        get() = !isTv
 
     actual const val isDesktop = false
 
@@ -166,6 +170,7 @@ actual object PlatformStuff {
                                 ?: "",
                             desc = exitInfo.description ?: "",
                             pssMb = (exitInfo.pss / 1024).toInt(),
+                            importance = exitInfo.importance,
                             isProbablySystemKill = isProbablySystemKill,
                             fgNoti = fgNoti,
                         )
@@ -200,7 +205,9 @@ actual object PlatformStuff {
         }
 
         try {
-            val browserIntent = Intent(Intent.ACTION_VIEW, url.toUri())
+            val uri = Stuff.localizeLastfmUrl(url).toUri()
+
+            val browserIntent = Intent(Intent.ACTION_VIEW, uri)
             browserIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
             applicationContext.startActivity(browserIntent)
@@ -307,13 +314,13 @@ actual object PlatformStuff {
             .setDriver(AndroidSQLiteDriver())
             // may fix Exception java.lang.IllegalStateException: Cannot perform this operation because there is no current transaction.
             // Exception android.database.sqlite.SQLiteDatabaseLockedException: database is locked (code 5 SQLITE_BUSY)
-            .setQueryCoroutineContext(Dispatchers.IO.limitedParallelism(1))
             // may fix multiprocess android.database.sqlite.SQLiteDatabaseLockedException: database is locked (code 5 SQLITE_BUSY[5])
             .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)
-//            .setQueryCoroutineContext(Dispatchers.IO)
+            .setQueryCoroutineContext(Dispatchers.IO.limitedParallelism(1))
 //            MultiInstanceInvalidation runs in the main process, keeping all the static caches alive
 //            .enableMultiInstanceInvalidation()
-            .setAutoCloseTimeout(7, TimeUnit.MINUTES)
+            // larger timeout reduces chances of Fatal Exception: java.lang.IllegalStateException: Cannot perform this operation because there is no current transaction.
+            .setAutoCloseTimeout(30, TimeUnit.MINUTES)
     }
 
     private val appLabelCache = mutableMapOf<String, String>()

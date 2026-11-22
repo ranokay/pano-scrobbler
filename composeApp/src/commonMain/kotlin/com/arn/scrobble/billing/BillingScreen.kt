@@ -6,11 +6,8 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.material3.DropdownMenu
-import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
+import androidx.compose.foundation.text.input.rememberTextFieldState
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.MediumExtendedFloatingActionButton
@@ -24,7 +21,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.text.font.FontStyle
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
@@ -34,16 +30,17 @@ import com.arn.scrobble.icons.Automation
 import com.arn.scrobble.icons.Block
 import com.arn.scrobble.icons.Check
 import com.arn.scrobble.icons.Favorite
+import com.arn.scrobble.icons.HelpAutoMirrored
 import com.arn.scrobble.icons.Icons
 import com.arn.scrobble.icons.Keep
 import com.arn.scrobble.icons.Palette
 import com.arn.scrobble.icons.RegularExpression
 import com.arn.scrobble.icons.Share
-import com.arn.scrobble.icons.automirrored.Help
 import com.arn.scrobble.main.MainViewModel
 import com.arn.scrobble.ui.ButtonWithIcon
 import com.arn.scrobble.ui.ErrorText
 import com.arn.scrobble.ui.IconButtonWithTooltip
+import com.arn.scrobble.ui.PanoDropdownMenu
 import com.arn.scrobble.ui.PanoOutlinedTextField
 import com.arn.scrobble.ui.PanoSnackbarVisuals
 import com.arn.scrobble.ui.getActivityOrNull
@@ -79,7 +76,6 @@ import pano_scrobbler.composeapp.generated.resources.regex_rules
 import pano_scrobbler.composeapp.generated.resources.thank_you
 import pano_scrobbler.composeapp.generated.resources.upto_n
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 fun BillingScreen(
     viewModel: MainViewModel,
@@ -111,14 +107,14 @@ fun BillingScreen(
     )
 
     var purchaseMethodsExpanded by rememberSaveable { mutableStateOf(false) }
-    var code by rememberSaveable { mutableStateOf("") }
+    val code = rememberTextFieldState()
     val purchaseMethods = remember { VariantStuff.billingRepository.purchaseMethods }
-    val needsActivationCode = remember { VariantStuff.billingRepository.needsActivationCode }
-    var purchaseMethodClicked by remember { mutableStateOf<PurchaseMethod?>(null) }
+    val needsActivationCode = remember { VariantStuff.isNonPlay }
+    var purchaseMethodClicked by rememberSaveable { mutableStateOf<PurchaseMethod?>(null) }
 
     fun verifyLicenseOnline() {
-        code.trim().ifEmpty { null }?.let {
-            viewModel.checkAndStoreLicense(it)
+        code.text.trim().ifEmpty { null }?.let {
+            viewModel.checkAndStoreLicense(it.toString())
         }
     }
 
@@ -176,10 +172,11 @@ fun BillingScreen(
                 ),
                 color = MaterialTheme.colorScheme.tertiary,
                 style = MaterialTheme.typography.titleMediumEmphasized,
+                modifier = Modifier.padding(vertical = 16.dp)
             )
         }
 
-        if (code.isEmpty()) {
+        if (code.text.isEmpty()) {
             Box(
                 modifier = Modifier.align(Alignment.CenterHorizontally)
             ) {
@@ -221,12 +218,12 @@ fun BillingScreen(
                     },
                 )
 
-                DropdownMenu(
+                PanoDropdownMenu(
                     expanded = purchaseMethodsExpanded,
                     onDismissRequest = { purchaseMethodsExpanded = false }
                 ) {
                     purchaseMethods.forEach { purchaseMethod ->
-                        DropdownMenuItem(
+                        item(
                             onClick = {
                                 viewModel.makePurchase(purchaseMethod, activity)
                                 purchaseMethodsExpanded = false
@@ -240,7 +237,7 @@ fun BillingScreen(
                                     )
                                     Text(
                                         purchaseMethod.displayDesc,
-                                        fontStyle = FontStyle.Italic
+                                        style = MaterialTheme.typography.bodySmall
                                     )
                                 }
                             }
@@ -252,21 +249,16 @@ fun BillingScreen(
 
         if (needsActivationCode) {
             PanoOutlinedTextField(
-                value = code,
-                onValueChange = {
-                    code = it
-                    errorText = null
-                },
+                code,
                 label = { Text(stringResource(Res.string.pref_imexport_code)) },
                 keyboardOptions = KeyboardOptions(
                     imeAction = ImeAction.Done,
                     keyboardType = KeyboardType.Ascii
                 ),
-                keyboardActions = KeyboardActions(
-                    onDone = {
-                        verifyLicenseOnline()
-                    }
-                ),
+                onKeyboardAction = { performDefaultAction ->
+                    verifyLicenseOnline()
+                    performDefaultAction()
+                },
                 trailingIcon = if (!PlatformStuff.isTv) {
                     {
                         IconButtonWithTooltip(
@@ -287,7 +279,7 @@ fun BillingScreen(
 
         ButtonWithIcon(
             onClick = onNavigateToTroubleshoot,
-            icon = Icons.AutoMirrored.Help,
+            icon = Icons.HelpAutoMirrored,
             text = stringResource(Res.string.help),
             modifier = Modifier
                 .padding(top = 16.dp)

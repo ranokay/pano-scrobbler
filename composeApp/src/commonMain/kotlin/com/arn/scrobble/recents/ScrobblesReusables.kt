@@ -1,32 +1,30 @@
 package com.arn.scrobble.recents
 
-import androidx.compose.animation.animateContentSize
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.wrapContentWidth
 import androidx.compose.foundation.lazy.LazyListScope
 import androidx.compose.foundation.lazy.items
-import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
-import androidx.compose.material3.ExperimentalMaterial3ExpressiveApi
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.MenuDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.State
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
-import androidx.compose.ui.unit.coerceAtLeast
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.viewModelScope
 import androidx.paging.LoadState
@@ -45,28 +43,26 @@ import com.arn.scrobble.db.BlockedMetadata
 import com.arn.scrobble.db.PanoDb
 import com.arn.scrobble.db.PendingScrobble
 import com.arn.scrobble.icons.Album
+import com.arn.scrobble.icons.ArrowBackAutoMirrored
+import com.arn.scrobble.icons.ArrowRightAutoMirrored
 import com.arn.scrobble.icons.ContentCopy
 import com.arn.scrobble.icons.Delete
-import com.arn.scrobble.icons.Dns
 import com.arn.scrobble.icons.Edit
-import com.arn.scrobble.icons.Error
 import com.arn.scrobble.icons.Favorite
+import com.arn.scrobble.icons.FavoriteFilled
 import com.arn.scrobble.icons.HeartBroken
 import com.arn.scrobble.icons.Icons
 import com.arn.scrobble.icons.Mic
 import com.arn.scrobble.icons.MusicNote
-import com.arn.scrobble.icons.Schedule
 import com.arn.scrobble.icons.Search
 import com.arn.scrobble.icons.Share
-import com.arn.scrobble.icons.automirrored.ArrowBack
-import com.arn.scrobble.icons.automirrored.KeyboardArrowRight
-import com.arn.scrobble.icons.filled.Favorite
 import com.arn.scrobble.media.getNowPlayingFromMainProcess
 import com.arn.scrobble.navigation.PanoRoute
 import com.arn.scrobble.pref.AppItem
 import com.arn.scrobble.ui.ExpandableHeaderItem
 import com.arn.scrobble.ui.ListLoadError
 import com.arn.scrobble.ui.MusicEntryListItem
+import com.arn.scrobble.ui.PanoDropdownMenu
 import com.arn.scrobble.ui.accountTypeLabel
 import com.arn.scrobble.ui.getMusicEntryPlaceholderItem
 import com.arn.scrobble.ui.shimmerWindowBounds
@@ -86,10 +82,10 @@ import pano_scrobbler.composeapp.generated.resources.copy
 import pano_scrobbler.composeapp.generated.resources.delete
 import pano_scrobbler.composeapp.generated.resources.edit
 import pano_scrobbler.composeapp.generated.resources.hate
+import pano_scrobbler.composeapp.generated.resources.last_error
 import pano_scrobbler.composeapp.generated.resources.love
 import pano_scrobbler.composeapp.generated.resources.more
 import pano_scrobbler.composeapp.generated.resources.network_error
-import pano_scrobbler.composeapp.generated.resources.scrobble_services
 import pano_scrobbler.composeapp.generated.resources.search
 import pano_scrobbler.composeapp.generated.resources.share
 import pano_scrobbler.composeapp.generated.resources.share_sig
@@ -103,7 +99,6 @@ private enum class TrackMenuLevel {
     Block
 }
 
-@OptIn(ExperimentalMaterial3ExpressiveApi::class)
 @Composable
 private fun TrackDropdownMenu(
     track: Track,
@@ -119,7 +114,6 @@ private fun TrackDropdownMenu(
     onDismissRequest: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-
     var menuLevel by remember(expanded) {
         mutableStateOf(
             if (editDialogArgs == null && onLove == null && onHate == null && onDelete == null)
@@ -129,38 +123,74 @@ private fun TrackDropdownMenu(
         )
     }
 
-    val moreFocusRequester = remember { FocusRequester() }
-    val blockFocusRequester = remember { FocusRequester() }
     val scope = rememberCoroutineScope()
     val isLicenseValid = LocalLicenseValidState.current
+    val searchInSource by
+    PlatformStuff.mainPrefs.data.collectAsStateWithInitialValue { it.searchInSource && isLicenseValid }
+    val shareSig =
+        stringResource(Res.string.share_sig).takeIf { !isLicenseValid }
 
-    LaunchedEffect(menuLevel) {
-        when (menuLevel) {
-            TrackMenuLevel.More -> {
-                moreFocusRequester.requestFocus()
-            }
-
-            TrackMenuLevel.Block -> {
-                blockFocusRequester.requestFocus()
-            }
-
-            TrackMenuLevel.Root -> {
-                // nothing
-            }
-        }
-    }
-
-    DropdownMenu(
+    PanoDropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismissRequest,
+        headerContent = when (menuLevel) {
+            TrackMenuLevel.More if !PlatformStuff.isTv -> {
+                {
+                    DropdownMenuItem(
+                        onClick = {
+                            menuLevel = TrackMenuLevel.Root
+                        },
+                        shape = MenuDefaults.leadingItemShape,
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.ArrowBackAutoMirrored,
+                                contentDescription = null
+                            )
+                        },
+                        text = {
+                            Text(
+                                stringResource(Res.string.more),
+                                style = MaterialTheme.typography.titleMediumEmphasized
+                            )
+                        },
+                    )
+                }
+            }
+
+            TrackMenuLevel.Block if !PlatformStuff.isTv -> {
+                {
+                    DropdownMenuItem(
+                        onClick = {
+                            menuLevel = TrackMenuLevel.More
+                        },
+                        shape = MenuDefaults.leadingItemShape,
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.ArrowBackAutoMirrored,
+                                contentDescription = null
+                            )
+                        },
+                        text = {
+                            Text(
+                                stringResource(
+                                    Res.string.block
+                                ),
+                                style = MaterialTheme.typography.titleMediumEmphasized
+                            )
+                        },
+                    )
+                }
+            }
+
+            else -> null
+        },
         modifier = modifier
     ) {
-        @Composable
         fun copyItem() {
             if (!PlatformStuff.isTv) {
-                DropdownMenuItem(
+                item(
                     onClick = {
-                        PlatformStuff.copyToClipboard(track.artist.name + " - " + track.name)
+                        PlatformStuff.copyToClipboard(track.artist.name + " " + track.name)
                         onDismissRequest()
                     },
                     text = {
@@ -176,12 +206,9 @@ private fun TrackDropdownMenu(
             }
         }
 
-        @Composable
         fun searchItem() {
-            val searchInSource by
-            PlatformStuff.mainPrefs.data.collectAsStateWithInitialValue { it.searchInSource && isLicenseValid }
 
-            DropdownMenuItem(
+            item(
                 onClick = {
                     scope.launch {
                         PlatformStuff.launchSearchIntent(track, appId.takeIf { searchInSource })
@@ -205,7 +232,7 @@ private fun TrackDropdownMenu(
                 TrackMenuLevel.Root -> {
 
                     if (onLove != null) {
-                        DropdownMenuItem(
+                        item(
                             onClick = {
                                 val loved = track.userloved
                                 onLove(loved != true)
@@ -226,7 +253,7 @@ private fun TrackDropdownMenu(
                                     imageVector = if (track.userloved != true)
                                         Icons.Favorite
                                     else
-                                        Icons.Filled.Favorite,
+                                        Icons.FavoriteFilled,
                                     contentDescription = null
                                 )
                             }
@@ -234,7 +261,7 @@ private fun TrackDropdownMenu(
                     }
 
                     editDialogArgs?.invoke()?.let { dialogArgs ->
-                        DropdownMenuItem(
+                        item(
                             onClick = {
                                 onDismissRequest()
                                 onNavigate(dialogArgs)
@@ -252,7 +279,7 @@ private fun TrackDropdownMenu(
                     }
 
                     if (onDelete != null && track.date != null && track.date > 0 && !track.isNowPlaying) {
-                        DropdownMenuItem(
+                        item(
                             onClick = {
                                 onDelete()
                                 onDismissRequest()
@@ -273,16 +300,16 @@ private fun TrackDropdownMenu(
                         )
                     }
 
-                    DropdownMenuItem(
+                    item(
                         onClick = {
                             menuLevel = TrackMenuLevel.More
                         },
                         text = {
                             Text(stringResource(Res.string.more))
                         },
-                        trailingIcon = {
+                        trailingContent = {
                             Icon(
-                                imageVector = Icons.AutoMirrored.KeyboardArrowRight,
+                                imageVector = Icons.ArrowRightAutoMirrored,
                                 contentDescription = null
                             )
                         }
@@ -290,45 +317,24 @@ private fun TrackDropdownMenu(
                 }
 
                 TrackMenuLevel.More -> {
-                    if (!PlatformStuff.isTv) {
-                        DropdownMenuItem(
-                            onClick = {
-                                menuLevel = TrackMenuLevel.Root
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.ArrowBack,
-                                    contentDescription = null
-                                )
-                            },
-                            text = {
-                                Text(
-                                    stringResource(Res.string.more),
-                                    style = MaterialTheme.typography.titleMediumEmphasized
-                                )
-                            },
-                        )
-                    }
-
-                    DropdownMenuItem(
+                    item(
                         onClick = {
                             menuLevel = TrackMenuLevel.Block
                         },
                         text = {
                             Text(stringResource(Res.string.block))
                         },
-                        trailingIcon = {
+                        trailingContent = {
                             Icon(
-                                imageVector = Icons.AutoMirrored.KeyboardArrowRight,
+                                imageVector = Icons.ArrowRightAutoMirrored,
                                 contentDescription = null
                             )
                         },
-                        modifier = Modifier.focusRequester(moreFocusRequester)
                     )
 
                     if (onHate != null) {
 
-                        DropdownMenuItem(
+                        item(
                             onClick = {
                                 val newHated = track.userHated != true
                                 onHate(newHated)
@@ -350,10 +356,9 @@ private fun TrackDropdownMenu(
                     copyItem()
 
                     if (onShare != null) {
-                        val shareSig =
-                            stringResource(Res.string.share_sig).takeIf { !isLicenseValid }
 
-                        DropdownMenuItem(
+
+                        item(
                             onClick = {
                                 onShare(track, shareSig)
 
@@ -373,29 +378,7 @@ private fun TrackDropdownMenu(
                 }
 
                 TrackMenuLevel.Block -> {
-                    if (!PlatformStuff.isTv) {
-                        DropdownMenuItem(
-                            onClick = {
-                                menuLevel = TrackMenuLevel.More
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.ArrowBack,
-                                    contentDescription = null
-                                )
-                            },
-                            text = {
-                                Text(
-                                    stringResource(
-                                        Res.string.block
-                                    ),
-                                    style = MaterialTheme.typography.titleMediumEmphasized
-                                )
-                            },
-                        )
-                    }
-
-                    DropdownMenuItem(
+                    item(
                         onClick = {
                             val b = BlockedMetadata(
                                 artist = track.artist.name,
@@ -414,10 +397,9 @@ private fun TrackDropdownMenu(
                                 contentDescription = null
                             )
                         },
-                        modifier = Modifier.focusRequester(blockFocusRequester)
                     )
 
-                    DropdownMenuItem(
+                    item(
                         onClick = {
                             val b = BlockedMetadata(
                                 artist = track.artist.name,
@@ -437,7 +419,7 @@ private fun TrackDropdownMenu(
                         }
                     )
 
-                    DropdownMenuItem(
+                    item(
                         onClick = {
                             val b = BlockedMetadata(
                                 artist = track.artist.name,
@@ -468,7 +450,10 @@ fun LazyListScope.scrobblesPlaceholdersAndErrors(
 ) {
     when {
         tracks.loadState.refresh is LoadState.Loading -> {
-            items(10) {
+            items(
+                10,
+                key = { "shimmer_$it" }
+            ) {
                 MusicEntryListItem(
                     getMusicEntryPlaceholderItem(Stuff.TYPE_TRACKS),
                     forShimmer = true,
@@ -509,15 +494,42 @@ fun PendingDropdownMenu(
     onDelete: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    DropdownMenu(
+    PanoDropdownMenu(
         expanded = expanded,
         onDismissRequest = onDismissRequest,
-        modifier = modifier
-    ) {
-        PendingScrobbleDesc(pendingScrobble)
+        modifier = modifier,
+        headerContent = {
+            MenuDefaults.DropdownMenuGroupLabel {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(2.dp),
+                    modifier = Modifier.padding(vertical = 4.dp)
+                ) {
+                    Text(
+                        "ⓘ " + (pendingScrobble.lastFailedReason
+                            ?: stringResource(Res.string.network_error))
+                    )
 
+                    Text(
+                        PanoTimeFormatter.relative(
+                            pendingScrobble.lastFailedTimestamp,
+                            justNowString = stringResource(Res.string.time_just_now),
+                            withPreposition = true,
+                        ),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+
+                    Text(
+                        pendingScrobble.services.map {
+                            accountTypeLabel(it)
+                        }.joinToString(", "),
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        },
+    ) {
         if (pendingScrobble.event == ScrobbleEvent.scrobble) {
-            DropdownMenuItem(
+            item(
                 onClick = {
                     onLove(true)
                     onDismissRequest()
@@ -536,7 +548,7 @@ fun PendingDropdownMenu(
             )
         }
 
-        DropdownMenuItem(
+        item(
             onClick = {
                 onDelete()
                 onDismissRequest()
@@ -558,66 +570,6 @@ fun PendingDropdownMenu(
     }
 }
 
-@Composable
-private fun PendingScrobbleDesc(
-    pendingScrobble: PendingScrobble,
-) {
-    DropdownMenuItem(
-        onClick = {},
-        enabled = false,
-        text = {
-            Text(
-                stringResource(Res.string.scrobble_services) + ":\n" +
-                        pendingScrobble.services.map {
-                            accountTypeLabel(it)
-                        }.joinToString(", ")
-            )
-        },
-        leadingIcon = {
-            Icon(
-                imageVector = Icons.Dns,
-                contentDescription = null
-            )
-        }
-    )
-
-    DropdownMenuItem(
-        onClick = {},
-        enabled = false,
-        text = {
-            Text(
-                (pendingScrobble.lastFailedReason ?: stringResource(Res.string.network_error))
-            )
-        },
-        leadingIcon = {
-            Icon(
-                imageVector = Icons.Error,
-                contentDescription = null
-            )
-        }
-    )
-
-    DropdownMenuItem(
-        onClick = {},
-        enabled = false,
-        text = {
-            Text(
-                PanoTimeFormatter.relative(
-                    pendingScrobble.lastFailedTimestamp,
-                    justNowString = stringResource(Res.string.time_just_now),
-                    withPreposition = true,
-                )
-            )
-        },
-        leadingIcon = {
-            Icon(
-                imageVector = Icons.Schedule,
-                contentDescription = null
-            )
-        }
-    )
-}
-
 fun LazyListScope.scrobblesListItems(
     tracks: LazyPagingItems<TrackWrapper>,
     user: UserCached,
@@ -629,10 +581,10 @@ fun LazyListScope.scrobblesListItems(
     canEdit: Boolean,
     canDelete: Boolean,
     expandedKey: () -> String?,
-    onExpand: (String?) -> Unit,
+    onExpand: (String?, Boolean) -> Unit,
     onNavigate: (PanoRoute) -> Unit,
-    animateListItemContentSize: State<Boolean>,
-    maxHeight: State<Dp>,
+    isLandscape: () -> Boolean,
+    maxHeight: () -> Dp,
     viewModel: ScrobblesVM,
 ) {
     fun onTrackClick(track: Track, appId: String?) {
@@ -659,7 +611,7 @@ fun LazyListScope.scrobblesListItems(
             val isPlaceholder = item == null
             val isExpanded = !isPlaceholder && expandedKey() == item.key
 
-            var menuVisible by remember { mutableStateOf(false) }
+            var menuShown by remember { mutableStateOf(false) }
 
             val appItem = remember(track) {
                 if (showScrobbleSources) {
@@ -674,14 +626,14 @@ fun LazyListScope.scrobblesListItems(
                 entry = track,
                 appItem = appItem,
                 onEntryClick = { onTrackClick(track, appItem?.appId) },
-                isColumn = isExpanded,
+                isColumn = isExpanded && !isLandscape(),
                 fixedImageHeight = !isExpanded,
                 onImageClick = if (!isPlaceholder) {
                     {
-                        if (isExpanded)
-                            onExpand(null)
-                        else {
-                            onExpand(item.key)
+                        if (isExpanded) {
+                            onExpand(null, item.track.isNowPlaying)
+                        } else {
+                            onExpand(item.key, item.track.isNowPlaying)
                         }
                     }
                 } else null,
@@ -698,6 +650,7 @@ fun LazyListScope.scrobblesListItems(
                         editDialogArgs = if (canEdit) {
                             {
                                 val sd: ScrobbleData
+                                val osd: ScrobbleData
                                 val hash: Int?
 
                                 if (!track.isNowPlaying && track.date != null) {
@@ -712,11 +665,13 @@ fun LazyListScope.scrobblesListItems(
                                         appId = null
                                     )
                                     hash = null
+                                    osd = sd
                                 } else {
-                                    val sdToHash = getNowPlayingFromMainProcess()
-                                    if (sdToHash != null) {
-                                        sd = sdToHash.first
-                                        hash = sdToHash.second
+                                    val trackPlaying = getNowPlayingFromMainProcess()
+                                    if (trackPlaying != null) {
+                                        osd = trackPlaying.origScrobbleData
+                                        sd = trackPlaying.scrobbleData
+                                        hash = trackPlaying.hash
                                     } else {
 
                                         return@TrackDropdownMenu null
@@ -724,7 +679,8 @@ fun LazyListScope.scrobblesListItems(
                                 }
 
                                 PanoRoute.Modal.EditScrobble(
-                                    origScrobbleData = sd,
+                                    origScrobbleData = osd,
+                                    scrobbleData = sd,
                                     msid = track.msid,
                                     key = key,
                                     hash = hash
@@ -751,25 +707,22 @@ fun LazyListScope.scrobblesListItems(
                                 viewModel.shareTrack(t, shareSig)
                             }
                         } else null,
-                        expanded = menuVisible,
-                        onDismissRequest = { menuVisible = false }
+                        expanded = menuShown,
+                        onDismissRequest = { menuShown = false }
                     )
                 },
-                onMenuClick = { menuVisible = true },
+                menuShown = menuShown,
+                onMenuToggle = { menuShown = it },
                 modifier = Modifier
                     .animateItem()
                     .then(
-                        if (animateListItemContentSize.value)
-                            Modifier.animateContentSize()
-                        else
-                            Modifier
-                    )
-                    .then(
                         if (isExpanded)
                             Modifier.heightIn(
-                                max = maxHeight.value
-                                    .coerceAtLeast(100.dp)
+                                min = 100.dp,
+                                max = (maxHeight() * 0.75f).coerceAtLeast(100.dp)
                             )
+                                .fillMaxWidth()
+                                .wrapContentWidth()
                         else
                             Modifier
                     )
@@ -800,6 +753,7 @@ fun LazyListScope.pendingScrobblesListItems(
     headerText: String,
     headerIcon: ImageVector,
     items: List<PendingScrobble>,
+    lastErrored: PendingScrobble?,
     showScrobbleSources: Boolean,
     expanded: Boolean?, // null == not enough items to expand
     onToggle: (Boolean) -> Unit,
@@ -811,13 +765,29 @@ fun LazyListScope.pendingScrobblesListItems(
 
     item(key = headerText) {
         ExpandableHeaderItem(
-            title = headerText,
+            text = headerText,
             icon = headerIcon,
             expanded = expanded == true || expanded == null,
-            enabled = expanded != null,
+            canExpand = expanded != null,
             onToggle = onToggle,
-            modifier = Modifier.animateItem(),
+            modifier = Modifier.animateItem()
         )
+    }
+
+    if (lastErrored != null && !lastErrored.lastFailedReason.isNullOrEmpty()) {
+        item(key = "pending_scrobble_last_error") {
+            Text(
+                "ⓘ " + stringResource(Res.string.last_error) + ": " +
+                        lastErrored.lastFailedReason,
+                maxLines = 2,
+                overflow = TextOverflow.MiddleEllipsis,
+                style = MaterialTheme.typography.bodyMediumEmphasized,
+                modifier = Modifier
+                    .animateItem()
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            )
+        }
     }
 
     items(
@@ -835,7 +805,7 @@ fun LazyListScope.pendingScrobblesListItems(
                 userHated = item.event == ScrobbleEvent.unlove,
             )
         }
-        var menuVisible by remember { mutableStateOf(false) }
+        var menuShown by remember { mutableStateOf(false) }
         val appItem = remember(item) {
             if (showScrobbleSources)
                 item.scrobbleData.appId?.let { AppItem(it, PlatformStuff.loadApplicationLabel(it)) }
@@ -846,13 +816,14 @@ fun LazyListScope.pendingScrobblesListItems(
             musicEntry,
             appItem = appItem,
             onEntryClick = { onItemClick(musicEntry) },
-            onMenuClick = { menuVisible = true },
+            onMenuToggle = { menuShown = it },
+            menuShown = menuShown,
             isPending = true,
             menuContent = {
                 PendingDropdownMenu(
                     pendingScrobble = item,
-                    expanded = menuVisible,
-                    onDismissRequest = { menuVisible = false },
+                    expanded = menuShown,
+                    onDismissRequest = { menuShown = false },
                     onLove = {
                         viewModel.viewModelScope.launch(Dispatchers.IO) {
                             val track = Track(

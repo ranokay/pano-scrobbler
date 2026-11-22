@@ -9,6 +9,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
@@ -25,7 +26,6 @@ import androidx.compose.ui.unit.dp
 import com.arn.scrobble.BuildKonfig
 import com.arn.scrobble.main.ScrobblerState
 import com.arn.scrobble.navigation.PanoRoute
-import com.arn.scrobble.utils.AndroidStuff
 import com.arn.scrobble.utils.AndroidStuff.toast
 import com.arn.scrobble.utils.PlatformStuff
 import com.arn.scrobble.utils.Stuff
@@ -44,8 +44,8 @@ import pano_scrobbler.composeapp.generated.resources.fix_it_title
 import pano_scrobbler.composeapp.generated.resources.kill_reason
 import pano_scrobbler.composeapp.generated.resources.not_found
 import pano_scrobbler.composeapp.generated.resources.persistent_noti_desc
+import pano_scrobbler.composeapp.generated.resources.persistent_noti_fgs
 import pano_scrobbler.composeapp.generated.resources.persistent_noti_oems
-import pano_scrobbler.composeapp.generated.resources.show_persistent_noti
 import pano_scrobbler.composeapp.generated.resources.special_app_access
 
 
@@ -59,7 +59,7 @@ fun FixItDialog(
     val scope = rememberCoroutineScope()
     val showDkmaLayout = remember { !PlatformStuff.isTv }
     val canEnablePersistentNoti by PlatformStuff.mainPrefs.data.collectAsStateWithInitialValue {
-        !it.notiPersistent && AndroidStuff.canShowPersistentNotiIfEnabled
+        !it.notiPersistent
     }
 
     var exitReasonText by remember { mutableStateOf(killedReason?.formatted()) }
@@ -97,11 +97,12 @@ fun FixItDialog(
                     .padding(start = 16.dp)
             ) {
                 Text(
-                    text = stringResource(Res.string.show_persistent_noti),
+                    text = stringResource(Res.string.persistent_noti_fgs),
                     style = MaterialTheme.typography.titleMedium,
                     modifier = Modifier.weight(1f)
                 )
                 OutlinedButton(
+                    shapes = ButtonDefaults.shapes(),
                     onClick = {
                         scope.launch {
                             PlatformStuff.mainPrefs.updateData { it.copy(notiPersistent = true) }
@@ -134,6 +135,7 @@ fun FixItDialog(
                     modifier = Modifier.weight(1f)
                 )
                 OutlinedButton(
+                    shapes = ButtonDefaults.shapes(),
                     onClick = {
                         onNavigate(PanoRoute.Help())
                     },
@@ -157,6 +159,7 @@ fun FixItDialog(
                     modifier = Modifier.weight(1f)
                 )
                 OutlinedButton(
+                    shapes = ButtonDefaults.shapes(),
                     onClick = {
                         scope.launch {
                             context.toast(
